@@ -1,0 +1,18 @@
+skill: akiflow
+version: 1.0.0
+description: "Full Akiflow task + calendar management for the container agent"
+core_version: 0.1.0
+adds:
+  - container/skills/akiflow/SKILL.md
+modifies:
+  - src/container-runner.ts
+modify_base:
+  src/container-runner.ts: _accumulated
+conflicts: []
+incompatible_with: []
+depends:
+  - auth-recovery
+  - container-hardening
+  - perplexity-research
+tested_with: []
+test: "npx tsc --noEmit"
