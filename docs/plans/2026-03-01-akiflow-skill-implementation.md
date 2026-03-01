@@ -8,6 +8,20 @@
 
 **Tech Stack:** Bash (container skill functions), TypeScript (one-line host patch), vitest (existing test suite), `curl` + `jq` (runtime API calls inside container)
 
+**Task Dependencies:**
+
+```
+Task 1 (scaffold)
+    ├── Task 2 (container SKILL.md)    ─┐
+    ├── Task 3 (container-runner patch)  ├── Task 5 (build + test) → Task 6 (smoke test)
+    └── Task 4 (SKILL.md + registry)   ─┘
+```
+
+- **Task 1** must run first — creates the directory structure all other tasks write into
+- **Tasks 2, 3, 4** are fully independent of each other and can run in parallel once Task 1 is done; they write to different files and only Task 3 runs `apply-skills`
+- **Task 5** gates on Tasks 2, 3, and 4 all being complete before building
+- **Task 6** gates on Task 5
+
 ---
 
 ## Context: How NanoClaw Skills Work
