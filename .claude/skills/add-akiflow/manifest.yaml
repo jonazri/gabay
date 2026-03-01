@@ -13,6 +13,7 @@ incompatible_with: []
 depends:
   - auth-recovery
   - container-hardening
+  - google-home
   - perplexity-research
 tested_with: []
 test: "npx tsc --noEmit"

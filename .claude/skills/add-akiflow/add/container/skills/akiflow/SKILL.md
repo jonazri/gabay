@@ -46,6 +46,8 @@ akiflow:token() {
     if (( age < max_age )); then cat "$cache"; return 0; fi
   fi
   local tok
+  # NOTE: The response includes a new refresh_token. Akiflow may rotate tokens;
+  # if so, the cached .env value will eventually expire. Re-run setup to update it.
   tok=$(curl -sf -X POST "https://web.akiflow.com/oauth/refreshToken" \
     -H "Content-Type: application/json" \
     -d "{\"client_id\":\"1\",\"refresh_token\":\"$AKIFLOW_REFRESH_TOKEN\"}" \
@@ -142,9 +144,9 @@ Pass a JSON object. Required: `title`. Optional fields:
 akiflow:create-task() {
   local json="$1"
   local id
-  id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  id=$(node -e "process.stdout.write(crypto.randomUUID())") || return 1
   local payload
-  payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id} | if .status == null then . + {status: 1} else . end')
+  payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id} | if .status == null then . + {status: 1} else . end') || return 1
   curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
@@ -173,7 +175,7 @@ akiflow:update-task() {
   local id="$1"
   local patch="$2"
   local payload
-  payload=$(echo "$patch" | jq --arg id "$id" '. + {id: $id}')
+  payload=$(echo "$patch" | jq --arg id "$id" '. + {id: $id}') || return 1
   curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
@@ -296,7 +298,7 @@ akiflow:update-event() {
   local id="$1"
   local json="$2"
   local payload
-  payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id}')
+  payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id}') || return 1
   curl -sf -X POST "https://api.akiflow.com/v3/events" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
@@ -310,6 +312,8 @@ akiflow:delete-event() {
   local id="$1"
   local now_ms
   now_ms=$(( $(date +%s) * 1000 ))
+  # NOTE: Soft delete via partial POST to /v3/events — undocumented but consistent
+  # with the v5 task delete pattern. If this fails, try akiflow:list-events to verify.
   curl -sf -X POST "https://api.akiflow.com/v3/events" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
