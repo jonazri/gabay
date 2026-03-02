@@ -285,6 +285,23 @@ describe('structured', () => {
       expect(content).toBe(sampleFile);
     });
 
+    it('deduplicates secrets when input array contains duplicates', () => {
+      const crPath = path.join(tmpDir, 'container-runner.ts');
+      fs.writeFileSync(crPath, sampleFile);
+
+      mergeContainerSecrets(crPath, [
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+        'OPENAI_API_KEY',
+      ]);
+
+      const content = fs.readFileSync(crPath, 'utf-8');
+      const openAiMatches = content.match(/OPENAI_API_KEY/g);
+      const anthropicMatches = content.match(/ANTHROPIC_API_KEY/g);
+      expect(openAiMatches).toHaveLength(1);
+      expect(anthropicMatches).toHaveLength(1);
+    });
+
     it('throws when readEnvFile pattern not found', () => {
       const crPath = path.join(tmpDir, 'container-runner.ts');
       fs.writeFileSync(crPath, 'function readSecrets() { return {}; }');

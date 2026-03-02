@@ -232,8 +232,8 @@ export function mergeContainerSecrets(
     if (match) existingKeys.add(match[1]);
   }
 
-  // Filter to only new keys
-  const newKeys = secrets.filter((k) => !existingKeys.has(k));
+  // Filter to only new keys, deduplicating the input array
+  const newKeys = [...new Set(secrets)].filter((k) => !existingKeys.has(k));
   if (newKeys.length === 0) return;
 
   // Insert new keys before the closing ]);
