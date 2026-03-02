@@ -95,6 +95,10 @@ akiflow:list-today() {
 ```bash
 akiflow:list-upcoming() {
   local days="${1:-7}"
+  # Validate days is a positive integer (1-365) to prevent unexpected date output
+  if ! [[ "$days" =~ ^[0-9]+$ ]] || (( days < 1 || days > 365 )); then
+    echo "akiflow: days must be a number between 1 and 365" >&2; return 1
+  fi
   local end_date today
   end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d)
   today=$(date +%Y-%m-%d)

@@ -181,9 +181,31 @@ if (fs.existsSync(baseEnvPath)) {
       const baseEnv = fs.readFileSync(baseEnvPath);
       const currentEnv = fs.readFileSync(currentEnvPath);
       if (!baseEnv.equals(currentEnv)) {
-        fs.copyFileSync(baseEnvPath, currentEnvPath);
-        if (!restored.includes('.env.example')) {
-          restored.push('.env.example');
+        // Check for uncommitted changes before overwriting
+        let hasUncommittedEnvChanges = false;
+        try {
+          const status = execSync('git status --porcelain .env.example', {
+            cwd: projectRoot,
+            stdio: ['ignore', 'pipe', 'ignore'],
+          })
+            .toString()
+            .trim();
+          hasUncommittedEnvChanges = status.length > 0;
+        } catch {
+          // Not a git repo or git unavailable — fall back to overwriting
+          hasUncommittedEnvChanges = false;
+        }
+
+        if (hasUncommittedEnvChanges && !force) {
+          errors.push(
+            'Skipped restoring .env.example: it has uncommitted local changes. ' +
+              'Re-run with --force to overwrite.',
+          );
+        } else {
+          fs.copyFileSync(baseEnvPath, currentEnvPath);
+          if (!restored.includes('.env.example')) {
+            restored.push('.env.example');
+          }
         }
       }
     }

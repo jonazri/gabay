@@ -26,8 +26,9 @@ if (!skillName) {
   process.exit(1);
 }
 
-if (!/^[A-Za-z0-9._-]+$/.test(skillName)) {
-  console.error('Error: skill name must contain only letters, numbers, dots, hyphens, and underscores.');
+// Disallow dot-only names and ensure the name is a single safe path segment.
+if (skillName === '.' || skillName === '..' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(skillName)) {
+  console.error('Error: skill name must start with a letter or number and contain only letters, numbers, dots, hyphens, and underscores.');
   process.exit(1);
 }
 

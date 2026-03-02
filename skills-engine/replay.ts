@@ -223,7 +223,7 @@ export async function replaySkills(
 
           fs.copyFileSync(tmpCurrent, currentPath);
           if (!result.clean) {
-            skillConflicts.push(resolvedPath);
+            skillConflicts.push(relPath);
           }
         } finally {
           if (tmpBase) {
