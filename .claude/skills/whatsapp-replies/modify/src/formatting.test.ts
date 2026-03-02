@@ -62,9 +62,26 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
       '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+        '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
+  });
+
+  it('includes message id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'msg-xyz' })]);
+    expect(result).toContain('id="msg-xyz"');
+  });
+
+  it('includes id attribute in reply branch', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'reply-123', replied_to_content: 'Original message' }),
+    ]);
+    expect(result).toContain('id="reply-123"');
+  });
+
+  it('escapes special characters in id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'id-"&"' })]);
+    expect(result).toContain('id="id-&quot;&amp;&quot;"');
   });
 
   it('formats multiple messages', () => {

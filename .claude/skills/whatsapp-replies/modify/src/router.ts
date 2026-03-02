@@ -19,9 +19,9 @@ export function formatMessages(messages: NewMessage[]): string {
       : '';
     const content = `${replyTag}\n  ${escapeXml(m.content)}`.trimEnd();
     if (replyTag) {
-      return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${replyAttrs}>${content}\n</message>`;
+      return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${replyAttrs}>${content}\n</message>`;
     }
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${replyAttrs}>${escapeXml(m.content)}</message>`;
+    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${replyAttrs}>${escapeXml(m.content)}</message>`;
   });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }

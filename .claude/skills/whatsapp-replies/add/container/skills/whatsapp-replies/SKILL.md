@@ -7,20 +7,27 @@ description: Understanding reply context on inbound messages and sending threade
 
 ## Reading reply context
 
-When a user replies to a message in WhatsApp, the message XML includes reply metadata:
+Every message in the XML includes an `id` attribute. The **last `<message>` element is the triggering message** — the one you are responding to.
 
 ```xml
-<message sender="Bob" time="2026-..." replied_to_id="abc123" replied_to_sender="Alice">
+<message id="MSG_ID_HERE" sender="Bob" time="2026-...">Bob's message text</message>
+```
+
+When a user replies to an earlier message, the message XML also includes reply metadata:
+
+```xml
+<message id="MSG_ID_HERE" sender="Bob" time="2026-..." replied_to_id="abc123" replied_to_sender="972501234567@s.whatsapp.net">
   <reply_to>Alice's original message text</reply_to>
   Bob's reply text here
 </message>
 ```
 
-- `replied_to_id` — the ID of the message being replied to
-- `replied_to_sender` — the JID of who sent the original message
+- `id` — this message's own ID (use this to thread your reply to it)
+- `replied_to_id` — the ID of the message Bob is replying to
+- `replied_to_sender` — the **JID** (e.g. `972501234567@s.whatsapp.net`) of who sent the original message
 - `<reply_to>` — the text of the original message
 
-Use this to give contextually accurate responses. E.g. if Bob is replying to Alice's question, your response can acknowledge that clearly.
+Use reply context to give contextually accurate responses. E.g. if Bob is replying to Alice's question, your response can acknowledge that clearly.
 
 ## Sending threaded replies
 
@@ -29,13 +36,17 @@ Pass `quoted_message_id` to `send_message` to thread your reply in WhatsApp:
 ```
 send_message({
   text: "Here's my answer to that",
-  quoted_message_id: "abc123"
+  quoted_message_id: "MSG_ID_HERE"
 })
 ```
 
+To reply to the triggering message: use the `id` from the **last** `<message>` element.
+
+To continue a thread: use the `replied_to_id` from the triggering message.
+
 ### When to use threading
 
-**Group chats**: Default to threading your reply. It keeps conversations readable when multiple people are talking simultaneously. Use the `replied_to_id` from the triggering message, or any relevant message ID you want to respond to.
+**Group chats**: Default to threading your reply. It keeps conversations readable when multiple people are talking simultaneously.
 
 **Owner private chat**: Generally send plain messages — threading in a 1:1 conversation feels redundant and clutters the interface.
 
