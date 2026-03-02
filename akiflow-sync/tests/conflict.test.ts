@@ -88,7 +88,7 @@ describe('resolveAndUpsert — field-level LWW for tasks', () => {
         id: 'task-1',
         title: 'Task',
         listId: 'local-project',
-        list_id_updated_at: '2026-01-03T00:00:00Z', // local field is newer
+        global_list_id_updated_at: '2026-01-03T00:00:00Z', // local field is newer
         global_updated_at: '2026-01-01T00:00:00Z',
       }),
       new Date('2026-01-01T00:00:00Z').getTime(),
@@ -114,7 +114,7 @@ describe('resolveAndUpsert — field-level LWW for tasks', () => {
       JSON.stringify({
         id: 'task-1',
         listId: 'old-project',
-        list_id_updated_at: '2026-01-01T00:00:00Z',
+        global_list_id_updated_at: '2026-01-01T00:00:00Z',
         global_updated_at: '2026-01-01T00:00:00Z',
       }),
       new Date('2026-01-01T00:00:00Z').getTime(),
@@ -137,7 +137,7 @@ describe('resolveAndUpsert — field-level LWW for tasks', () => {
       JSON.stringify({
         id: 'task-1',
         tags_ids: ['local-tag'],
-        tags_ids_updated_at: '2026-01-03T00:00:00Z',
+        global_tags_ids_updated_at: '2026-01-03T00:00:00Z',
         global_updated_at: '2026-01-01T00:00:00Z',
       }),
       new Date('2026-01-01T00:00:00Z').getTime(),
@@ -162,7 +162,7 @@ describe('resolveAndUpsert — field-level LWW for tasks', () => {
         id: 'task-1',
         title: 'Local title',
         tags_ids: ['old-tag'],
-        tags_ids_updated_at: '2026-01-01T00:00:00Z',
+        global_tags_ids_updated_at: '2026-01-01T00:00:00Z',
         global_updated_at: '2026-01-03T00:00:00Z', // local entity wins
       }),
       new Date('2026-01-03T00:00:00Z').getTime(),

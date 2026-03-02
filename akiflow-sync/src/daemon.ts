@@ -45,6 +45,14 @@ async function main(): Promise<void> {
   const db = initDb(resolve(process.cwd(), dbPath));
   const auth = new AkiflowAuth(refreshToken, envPath);
 
+  // Reset any rows stuck in 'processing' from a previous crash
+  const stuck = db.prepare(
+    "UPDATE pending_writes SET status = 'pending' WHERE status = 'processing'"
+  ).run();
+  if (stuck.changes > 0) {
+    logger.warn(`[daemon] reset ${stuck.changes} stuck 'processing' row(s) to 'pending'`);
+  }
+
   logger.info('[daemon] running initial sync of all entities');
   await syncAllEntities(db, auth);
 

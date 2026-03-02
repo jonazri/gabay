@@ -37,14 +37,14 @@ function protectLocalFields(remote: ApiEntity, localDataJson: string): ApiEntity
   const entity = { ...remote };
 
   const remoteListTs = toMs(remote.global_list_id_updated_at as string | null);
-  const localListTs = toMs(local.list_id_updated_at as string | null);
+  const localListTs = toMs(local.global_list_id_updated_at as string | null);
   if (localListTs > remoteListTs) {
     entity.listId = local.listId;
-    entity.sectionId = local.sectionId;
+    entity.section_id = local.section_id;
   }
 
   const remoteTagsTs = toMs(remote.global_tags_ids_updated_at as string | null);
-  const localTagsTs = toMs(local.tags_ids_updated_at as string | null);
+  const localTagsTs = toMs(local.global_tags_ids_updated_at as string | null);
   if (localTagsTs > remoteTagsTs) {
     entity.tags_ids = local.tags_ids;
   }
@@ -62,16 +62,16 @@ function applyNewerRemoteFields(
   let changed = false;
 
   const remoteListTs = toMs(remote.global_list_id_updated_at as string | null);
-  const localListTs = toMs(local.list_id_updated_at as string | null);
+  const localListTs = toMs(local.global_list_id_updated_at as string | null);
   if (remoteListTs > localListTs) {
     local.listId = remote.listId;
-    local.sectionId = remote.sectionId;
+    local.section_id = remote.section_id;
     local.global_list_id_updated_at = remote.global_list_id_updated_at;
     changed = true;
   }
 
   const remoteTagsTs = toMs(remote.global_tags_ids_updated_at as string | null);
-  const localTagsTs = toMs(local.tags_ids_updated_at as string | null);
+  const localTagsTs = toMs(local.global_tags_ids_updated_at as string | null);
   if (remoteTagsTs > localTagsTs) {
     local.tags_ids = remote.tags_ids;
     local.global_tags_ids_updated_at = remote.global_tags_ids_updated_at;

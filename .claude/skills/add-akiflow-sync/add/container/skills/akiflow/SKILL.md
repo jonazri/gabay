@@ -49,7 +49,8 @@ akiflow:list-all() {
     SELECT data FROM tasks
     WHERE json_extract(data,'$.done') = 0
       AND json_extract(data,'$.deleted_at') IS NULL
-      AND json_extract(data,'$.status') IN (1,2,4,7)"
+      AND json_extract(data,'$.status') IN (1,2,4,7)" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -61,7 +62,8 @@ akiflow:list-inbox() {
     WHERE json_extract(data,'$.status') = 1
       AND json_extract(data,'$.done') = 0
       AND json_extract(data,'$.deleted_at') IS NULL
-    ORDER BY json_extract(data,'$.sorting') ASC"
+    ORDER BY json_extract(data,'$.sorting') ASC" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -74,7 +76,8 @@ akiflow:list-today() {
     SELECT data FROM tasks
     WHERE json_extract(data,'$.date') = '$today'
       AND json_extract(data,'$.done') = 0
-      AND json_extract(data,'$.deleted_at') IS NULL"
+      AND json_extract(data,'$.deleted_at') IS NULL" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -93,7 +96,8 @@ akiflow:list-upcoming() {
     WHERE json_extract(data,'$.done') = 0
       AND json_extract(data,'$.deleted_at') IS NULL
       AND json_extract(data,'$.date') >= '$today'
-      AND json_extract(data,'$.date') <= '$end_date'"
+      AND json_extract(data,'$.date') <= '$end_date'" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -104,7 +108,8 @@ akiflow:list-someday() {
     SELECT data FROM tasks
     WHERE json_extract(data,'$.status') = 7
       AND json_extract(data,'$.done') = 0
-      AND json_extract(data,'$.deleted_at') IS NULL"
+      AND json_extract(data,'$.deleted_at') IS NULL" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -118,7 +123,8 @@ akiflow:search-tasks() {
     SELECT data FROM tasks
     WHERE lower(json_extract(data,'$.title')) LIKE '%${escaped_query}%'
       AND json_extract(data,'$.done') = 0
-      AND json_extract(data,'$.deleted_at') IS NULL"
+      AND json_extract(data,'$.deleted_at') IS NULL" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -180,6 +186,10 @@ akiflow:update-task() {
   local patch="$2"
   local now_ms payload escaped
 
+  if ! [[ "$id" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]; then
+    echo "akiflow: invalid id: '$id'" >&2; return 1
+  fi
+
   now_ms=$(( $(date +%s) * 1000 ))
   payload=$(echo "$patch" | jq --arg id "$id" --argjson ts "$now_ms" '. + {id: $id, updated_at: $ts}')
   escaped=$(echo "$payload" | sed "s/'/''/g")
@@ -197,7 +207,8 @@ akiflow:update-task() {
       VALUES ('tasks', 'PATCH', json('$escaped'), $now_ms);
     COMMIT;"
 
-  sqlite3 -json "$AKIFLOW_DB" "SELECT data FROM tasks WHERE id = '$id'"
+  sqlite3 -json "$AKIFLOW_DB" "SELECT data FROM tasks WHERE id = '$id'" \
+    | jq '.[0].data | fromjson'
 }
 ```
 
@@ -218,6 +229,9 @@ akiflow:update-task "task-uuid" '{"status": 7, "date": null, "datetime": null}'
 akiflow:complete-task() {
   local id="$1"
   local now_ms escaped_payload
+  if ! [[ "$id" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]; then
+    echo "akiflow: invalid id: '$id'" >&2; return 1
+  fi
   now_ms=$(( $(date +%s) * 1000 ))
   escaped_payload="{\"id\":\"$id\",\"done\":true,\"done_at\":$now_ms,\"status\":3,\"updated_at\":$now_ms}"
   local escaped
@@ -243,6 +257,9 @@ akiflow:complete-task() {
 akiflow:delete-task() {
   local id="$1"
   local now_ms escaped_payload escaped
+  if ! [[ "$id" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]; then
+    echo "akiflow: invalid id: '$id'" >&2; return 1
+  fi
   now_ms=$(( $(date +%s) * 1000 ))
   escaped_payload="{\"id\":\"$id\",\"status\":6,\"deleted_at\":$now_ms,\"updated_at\":$now_ms}"
   escaped=$(echo "$escaped_payload" | sed "s/'/''/g")
@@ -270,7 +287,8 @@ akiflow:list-labels() {
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM labels
     WHERE json_extract(data,'$.deleted_at') IS NULL
-    ORDER BY json_extract(data,'$.sorting') ASC"
+    ORDER BY json_extract(data,'$.sorting') ASC" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -281,7 +299,8 @@ Response fields: `id`, `name`, `color` (hex), `is_tag` (false=project, true=tag)
 ### List calendars
 ```bash
 akiflow:list-calendars() {
-  sqlite3 -json "$AKIFLOW_DB" "SELECT data FROM calendars WHERE json_extract(data,'$.deleted_at') IS NULL"
+  sqlite3 -json "$AKIFLOW_DB" "SELECT data FROM calendars WHERE json_extract(data,'$.deleted_at') IS NULL" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -290,11 +309,18 @@ akiflow:list-calendars() {
 akiflow:list-events() {
   local start="$1"  # ISO date: 2026-03-01
   local end="$2"    # ISO date: 2026-03-07
+  if ! [[ "$start" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "akiflow: invalid start date: '$start' (expected YYYY-MM-DD)" >&2; return 1
+  fi
+  if ! [[ "$end" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "akiflow: invalid end date: '$end' (expected YYYY-MM-DD)" >&2; return 1
+  fi
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM events
     WHERE json_extract(data,'$.start') >= '${start}'
       AND json_extract(data,'$.start') < '${end}'
-      AND json_extract(data,'$.deleted_at') IS NULL"
+      AND json_extract(data,'$.deleted_at') IS NULL" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -333,6 +359,10 @@ akiflow:update-event() {
   local json="$2"
   local now_ms payload escaped
 
+  if ! [[ "$id" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]; then
+    echo "akiflow: invalid id: '$id'" >&2; return 1
+  fi
+
   now_ms=$(( $(date +%s) * 1000 ))
   payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id}')
   escaped=$(echo "$payload" | sed "s/'/''/g")
@@ -357,6 +387,9 @@ akiflow:update-event() {
 akiflow:delete-event() {
   local id="$1"
   local now_ms escaped_payload escaped
+  if ! [[ "$id" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]; then
+    echo "akiflow: invalid id: '$id'" >&2; return 1
+  fi
   now_ms=$(( $(date +%s) * 1000 ))
   escaped_payload="{\"id\":\"$id\",\"deleted_at\":$now_ms}"
   escaped=$(echo "$escaped_payload" | sed "s/'/''/g")
@@ -377,7 +410,8 @@ akiflow:delete-event() {
 akiflow:list-slots() {
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM time_slots
-    WHERE json_extract(data,'$.deleted_at') IS NULL"
+    WHERE json_extract(data,'$.deleted_at') IS NULL" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
@@ -388,7 +422,8 @@ akiflow:list-slots-today() {
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM time_slots
     WHERE json_extract(data,'$.deleted_at') IS NULL
-      AND json_extract(data,'$.date') = '$date'"
+      AND json_extract(data,'$.date') = '$date'" \
+    | jq '[.[].data | fromjson]'
 }
 ```
 
