@@ -167,10 +167,11 @@ akiflow:create-task() {
   id=$(node -e "process.stdout.write(crypto.randomUUID())") || return 1
   local payload
   payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id} | if .status == null then . + {status: 1} else . end') || return 1
-  curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    -H "Content-Type: application/json" \
-    -d "[$payload]" | jq '.data[0]'
+  printf '%s\n' "[$payload]" \
+    | curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
+        -H "Authorization: Bearer $(akiflow:token)" \
+        -H "Content-Type: application/json" \
+        -d @- | jq '.data[0]'
 }
 ```
 
@@ -196,10 +197,11 @@ akiflow:update-task() {
   local patch="$2"
   local payload
   payload=$(echo "$patch" | jq --arg id "$id" '. + {id: $id}') || return 1
-  curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    -H "Content-Type: application/json" \
-    -d "[$payload]" | jq '.data[0]'
+  printf '%s\n' "[$payload]" \
+    | curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
+        -H "Authorization: Bearer $(akiflow:token)" \
+        -H "Content-Type: application/json" \
+        -d @- | jq '.data[0]'
 }
 ```
 
@@ -319,10 +321,11 @@ akiflow:update-event() {
   local json="$2"
   local payload
   payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id}') || return 1
-  curl -sf -X POST "https://api.akiflow.com/v3/events" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    -H "Content-Type: application/json" \
-    -d "$payload" | jq '.data // .'
+  printf '%s\n' "$payload" \
+    | curl -sf -X POST "https://api.akiflow.com/v3/events" \
+        -H "Authorization: Bearer $(akiflow:token)" \
+        -H "Content-Type: application/json" \
+        -d @- | jq '.data // .'
 }
 ```
 
@@ -334,10 +337,11 @@ akiflow:delete-event() {
   now_ms=$(( $(date +%s) * 1000 ))
   # NOTE: Soft delete via partial POST to /v3/events — undocumented but consistent
   # with the v5 task delete pattern. If this fails, try akiflow:list-events to verify.
-  curl -sf -X POST "https://api.akiflow.com/v3/events" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    -H "Content-Type: application/json" \
-    -d "{\"id\":\"$id\",\"deleted_at\":$now_ms}" | jq '.data // .'
+  jq -n --arg id "$id" --argjson ts "$now_ms" '{id: $id, deleted_at: $ts}' \
+    | curl -sf -X POST "https://api.akiflow.com/v3/events" \
+        -H "Authorization: Bearer $(akiflow:token)" \
+        -H "Content-Type: application/json" \
+        -d @- | jq '.data // .'
 }
 ```
 
