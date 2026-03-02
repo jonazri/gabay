@@ -8,6 +8,7 @@ import makeWASocket, {
   WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
+  normalizeMessageContent,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
@@ -173,6 +174,11 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
+        // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
+        // editedMessage, etc.) so that conversation, extendedTextMessage,
+        // imageMessage, etc. are accessible at the top level.
+        const normalized = normalizeMessageContent(msg.message);
+        if (!normalized) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
@@ -197,10 +203,10 @@ export class WhatsAppChannel implements Channel {
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
           const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
+            normalized.conversation ||
+            normalized.extendedTextMessage?.text ||
+            normalized.imageMessage?.caption ||
+            normalized.videoMessage?.caption ||
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
@@ -226,7 +232,10 @@ export class WhatsAppChannel implements Channel {
               const transcript = await transcribeAudioMessage(msg, this.sock);
               if (transcript) {
                 finalContent = `[Voice: ${transcript}]`;
-                logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
+                logger.info(
+                  { chatJid, length: transcript.length },
+                  'Transcribed voice message',
+                );
               } else {
                 finalContent = '[Voice Message - transcription unavailable]';
               }
