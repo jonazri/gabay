@@ -11,6 +11,8 @@ modify_base:
 structured:
   env_additions:
     - PERPLEXITY_API_KEY
+  container_secrets:
+    - PERPLEXITY_API_KEY
 conflicts: []
 incompatible_with: []
 depends:

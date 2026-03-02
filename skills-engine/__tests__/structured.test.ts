@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import {
   areRangesCompatible,
+  mergeContainerSecrets,
   mergeNpmDependencies,
   mergeEnvAdditions,
   mergeDockerComposeServices,
@@ -68,10 +69,17 @@ describe('structured', () => {
   describe('mergeNpmDependencies', () => {
     it('adds new dependencies', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(pkgPath, JSON.stringify({
-        name: 'test',
-        dependencies: { existing: '^1.0.0' },
-      }, null, 2));
+      fs.writeFileSync(
+        pkgPath,
+        JSON.stringify(
+          {
+            name: 'test',
+            dependencies: { existing: '^1.0.0' },
+          },
+          null,
+          2,
+        ),
+      );
 
       mergeNpmDependencies(pkgPath, { newdep: '^2.0.0' });
 
@@ -82,10 +90,17 @@ describe('structured', () => {
 
     it('resolves compatible ^ ranges', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(pkgPath, JSON.stringify({
-        name: 'test',
-        dependencies: { dep: '^1.0.0' },
-      }, null, 2));
+      fs.writeFileSync(
+        pkgPath,
+        JSON.stringify(
+          {
+            name: 'test',
+            dependencies: { dep: '^1.0.0' },
+          },
+          null,
+          2,
+        ),
+      );
 
       mergeNpmDependencies(pkgPath, { dep: '^1.1.0' });
 
@@ -95,11 +110,18 @@ describe('structured', () => {
 
     it('sorts devDependencies after merge', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(pkgPath, JSON.stringify({
-        name: 'test',
-        dependencies: {},
-        devDependencies: { zlib: '^1.0.0', acorn: '^2.0.0' },
-      }, null, 2));
+      fs.writeFileSync(
+        pkgPath,
+        JSON.stringify(
+          {
+            name: 'test',
+            dependencies: {},
+            devDependencies: { zlib: '^1.0.0', acorn: '^2.0.0' },
+          },
+          null,
+          2,
+        ),
+      );
 
       mergeNpmDependencies(pkgPath, { middle: '^1.0.0' });
 
@@ -110,10 +132,17 @@ describe('structured', () => {
 
     it('throws on incompatible major versions', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(pkgPath, JSON.stringify({
-        name: 'test',
-        dependencies: { dep: '^1.0.0' },
-      }, null, 2));
+      fs.writeFileSync(
+        pkgPath,
+        JSON.stringify(
+          {
+            name: 'test',
+            dependencies: { dep: '^1.0.0' },
+          },
+          null,
+          2,
+        ),
+      );
 
       expect(() => mergeNpmDependencies(pkgPath, { dep: '^2.0.0' })).toThrow();
     });
@@ -170,7 +199,10 @@ describe('structured', () => {
   describe('mergeDockerComposeServices', () => {
     it('adds new services', () => {
       const composePath = path.join(tmpDir, 'docker-compose.yaml');
-      fs.writeFileSync(composePath, 'version: "3"\nservices:\n  web:\n    image: nginx\n');
+      fs.writeFileSync(
+        composePath,
+        'version: "3"\nservices:\n  web:\n    image: nginx\n',
+      );
 
       mergeDockerComposeServices(composePath, {
         redis: { image: 'redis:7' },
@@ -182,7 +214,10 @@ describe('structured', () => {
 
     it('skips existing services', () => {
       const composePath = path.join(tmpDir, 'docker-compose.yaml');
-      fs.writeFileSync(composePath, 'version: "3"\nservices:\n  web:\n    image: nginx\n');
+      fs.writeFileSync(
+        composePath,
+        'version: "3"\nservices:\n  web:\n    image: nginx\n',
+      );
 
       mergeDockerComposeServices(composePath, {
         web: { image: 'apache' },
@@ -194,11 +229,86 @@ describe('structured', () => {
 
     it('throws on port collision', () => {
       const composePath = path.join(tmpDir, 'docker-compose.yaml');
-      fs.writeFileSync(composePath, 'version: "3"\nservices:\n  web:\n    image: nginx\n    ports:\n      - "8080:80"\n');
+      fs.writeFileSync(
+        composePath,
+        'version: "3"\nservices:\n  web:\n    image: nginx\n    ports:\n      - "8080:80"\n',
+      );
 
-      expect(() => mergeDockerComposeServices(composePath, {
-        api: { image: 'node', ports: ['8080:3000'] },
-      })).toThrow();
+      expect(() =>
+        mergeDockerComposeServices(composePath, {
+          api: { image: 'node', ports: ['8080:3000'] },
+        }),
+      ).toThrow();
+    });
+  });
+
+  describe('mergeContainerSecrets', () => {
+    const sampleFile = [
+      'function readSecrets(): Record<string, string> {',
+      '  return readEnvFile([',
+      "    'CLAUDE_CODE_OAUTH_TOKEN',",
+      "    'ANTHROPIC_API_KEY',",
+      '  ]);',
+      '}',
+    ].join('\n');
+
+    it('adds new secrets to existing readEnvFile array', () => {
+      const crPath = path.join(tmpDir, 'container-runner.ts');
+      fs.writeFileSync(crPath, sampleFile);
+
+      mergeContainerSecrets(crPath, ['OPENAI_API_KEY']);
+
+      const content = fs.readFileSync(crPath, 'utf-8');
+      expect(content).toContain("'OPENAI_API_KEY',");
+      expect(content).toContain("'CLAUDE_CODE_OAUTH_TOKEN',");
+      expect(content).toContain("'ANTHROPIC_API_KEY',");
+    });
+
+    it('skips secrets that already exist', () => {
+      const crPath = path.join(tmpDir, 'container-runner.ts');
+      fs.writeFileSync(crPath, sampleFile);
+
+      mergeContainerSecrets(crPath, ['ANTHROPIC_API_KEY']);
+
+      const content = fs.readFileSync(crPath, 'utf-8');
+      const matches = content.match(/ANTHROPIC_API_KEY/g);
+      expect(matches).toHaveLength(1);
+    });
+
+    it('handles empty secrets array (no-op)', () => {
+      const crPath = path.join(tmpDir, 'container-runner.ts');
+      fs.writeFileSync(crPath, sampleFile);
+
+      mergeContainerSecrets(crPath, []);
+
+      const content = fs.readFileSync(crPath, 'utf-8');
+      expect(content).toBe(sampleFile);
+    });
+
+    it('deduplicates secrets when input array contains duplicates', () => {
+      const crPath = path.join(tmpDir, 'container-runner.ts');
+      fs.writeFileSync(crPath, sampleFile);
+
+      mergeContainerSecrets(crPath, [
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+        'OPENAI_API_KEY',
+      ]);
+
+      const content = fs.readFileSync(crPath, 'utf-8');
+      const openAiMatches = content.match(/OPENAI_API_KEY/g);
+      const anthropicMatches = content.match(/ANTHROPIC_API_KEY/g);
+      expect(openAiMatches).toHaveLength(1);
+      expect(anthropicMatches).toHaveLength(1);
+    });
+
+    it('throws when readEnvFile pattern not found', () => {
+      const crPath = path.join(tmpDir, 'container-runner.ts');
+      fs.writeFileSync(crPath, 'function readSecrets() { return {}; }');
+
+      expect(() => mergeContainerSecrets(crPath, ['SOME_KEY'])).toThrow(
+        /readEnvFile/,
+      );
     });
   });
 });

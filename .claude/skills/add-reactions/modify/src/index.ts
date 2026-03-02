@@ -1,3 +1,23 @@
+// Clamp setTimeout/setInterval to the max safe 32-bit signed integer to prevent
+// TimeoutOverflowWarning from Baileys' internal session key expiry timers (~365 days).
+const MAX_TIMER_MS = 0x7fff_ffff; // 2^31 - 1 ≈ 24.8 days
+const _origSetTimeout = globalThis.setTimeout;
+const _origSetInterval = globalThis.setInterval;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+globalThis.setTimeout = ((cb: any, ms?: number, ...args: any[]) =>
+  _origSetTimeout(
+    cb,
+    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
+    ...args,
+  )) as typeof setTimeout;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+globalThis.setInterval = ((cb: any, ms?: number, ...args: any[]) =>
+  _origSetInterval(
+    cb,
+    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
+    ...args,
+  )) as typeof setInterval;
+
 import fs from 'fs';
 import path from 'path';
 
@@ -87,14 +107,8 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
-  setRouterState(
-    'cursor_before_pipe',
-    JSON.stringify(cursorBeforePipe),
-  );
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState('cursor_before_pipe', JSON.stringify(cursorBeforePipe));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -215,7 +229,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // Mark all user messages as thinking (container is spawning)
-  const userMessages = missedMessages.filter((m) => !m.is_from_me && !m.is_bot_message);
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
   for (const msg of userMessages) {
     statusTracker.markThinking(msg.id);
   }
@@ -270,7 +286,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
         delete cursorBeforePipe[chatJid];
         saveState();
-        logger.warn({ group: group.name }, 'Agent error after output, rolled back piped messages for retry');
+        logger.warn(
+          { group: group.name },
+          'Agent error after output, rolled back piped messages for retry',
+        );
         statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
         return false;
       }
@@ -628,11 +647,17 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (messageId) {
-        if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
-        const messageKey = { id: messageId, remoteJid: jid, fromMe: getMessageFromMe(messageId, jid) };
+        if (!channel.sendReaction)
+          throw new Error('Channel does not support sendReaction');
+        const messageKey = {
+          id: messageId,
+          remoteJid: jid,
+          fromMe: getMessageFromMe(messageId, jid),
+        };
         await channel.sendReaction(jid, messageKey, emoji);
       } else {
-        if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');
+        if (!channel.reactToLatestMessage)
+          throw new Error('Channel does not support reactions');
         await channel.reactToLatestMessage(jid, emoji);
       }
     },

@@ -9,6 +9,7 @@ import makeWASocket, {
   WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
+  normalizeMessageContent,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
@@ -18,7 +19,13 @@ import {
   OWNER_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, getLatestMessage, setLastGroupSync, storeReaction, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { identifySpeaker } from '../voice-recognition.js';
@@ -33,7 +40,9 @@ import {
 /**
  * Extract text content from a Baileys quoted message proto.
  */
-function extractQuotedText(quotedMessage: Record<string, unknown> | null | undefined): string | undefined {
+function extractQuotedText(
+  quotedMessage: Record<string, unknown> | null | undefined,
+): string | undefined {
   if (!quotedMessage) return undefined;
   const q = quotedMessage as {
     conversation?: string;
@@ -41,7 +50,13 @@ function extractQuotedText(quotedMessage: Record<string, unknown> | null | undef
     imageMessage?: { caption?: string };
     videoMessage?: { caption?: string };
   };
-  return q.conversation || q.extendedTextMessage?.text || q.imageMessage?.caption || q.videoMessage?.caption || undefined;
+  return (
+    q.conversation ||
+    q.extendedTextMessage?.text ||
+    q.imageMessage?.caption ||
+    q.videoMessage?.caption ||
+    undefined
+  );
 }
 
 const VOICE_AUDIO_DIR = path.join(process.cwd(), 'data', 'voice-audio');
@@ -60,7 +75,11 @@ export class WhatsAppChannel implements Channel {
   private sock!: WASocket;
   private connected = false;
   private lidToPhoneMap: Record<string, string> = {};
-  private outgoingQueue: Array<{ jid: string; text: string; quotedKey?: QuotedMessageKey }> = [];
+  private outgoingQueue: Array<{
+    jid: string;
+    text: string;
+    quotedKey?: QuotedMessageKey;
+  }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
   private reconnectAttempt = 0;
@@ -200,6 +219,11 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
+        // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
+        // editedMessage, etc.) so that conversation, extendedTextMessage,
+        // imageMessage, etc. are accessible at the top level.
+        const normalized = normalizeMessageContent(msg.message);
+        if (!normalized) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
@@ -224,10 +248,10 @@ export class WhatsAppChannel implements Channel {
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
           const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
+            normalized.conversation ||
+            normalized.extendedTextMessage?.text ||
+            normalized.imageMessage?.caption ||
+            normalized.videoMessage?.caption ||
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
@@ -255,7 +279,10 @@ export class WhatsAppChannel implements Channel {
           const repliedToId = contextInfo?.stanzaId || undefined;
           const repliedToSender = contextInfo?.participant || undefined;
           const repliedToContent = extractQuotedText(
-            contextInfo?.quotedMessage as Record<string, unknown> | null | undefined,
+            contextInfo?.quotedMessage as
+              | Record<string, unknown>
+              | null
+              | undefined,
           );
 
           // Transcribe voice messages and identify speaker
@@ -366,7 +393,8 @@ export class WhatsAppChannel implements Channel {
           const chatJid = await this.translateJid(rawChatJid);
           const groups = this.opts.registeredGroups();
           if (!groups[chatJid]) continue;
-          const reactorJid = reaction.key?.participant || reaction.key?.remoteJid || '';
+          const reactorJid =
+            reaction.key?.participant || reaction.key?.remoteJid || '';
           const emoji = reaction.text || '';
           const timestamp = reaction.senderTimestampMs
             ? new Date(Number(reaction.senderTimestampMs)).toISOString()
@@ -386,7 +414,7 @@ export class WhatsAppChannel implements Channel {
               reactor: reactorJid.split('@')[0],
               emoji: emoji || '(removed)',
             },
-            emoji ? 'Reaction added' : 'Reaction removed'
+            emoji ? 'Reaction added' : 'Reaction removed',
           );
         } catch (err) {
           logger.error({ err }, 'Failed to process reaction');
@@ -395,7 +423,11 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, quotedKey?: QuotedMessageKey): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    quotedKey?: QuotedMessageKey,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
@@ -414,7 +446,16 @@ export class WhatsAppChannel implements Channel {
     }
     try {
       if (quotedKey) {
-        await this.sock.sendMessage(jid, { text: prefixed }, { quoted: { key: quotedKey, message: { conversation: quotedKey.content || '' } } });
+        await this.sock.sendMessage(
+          jid,
+          { text: prefixed },
+          {
+            quoted: {
+              key: quotedKey,
+              message: { conversation: quotedKey.content || '' },
+            },
+          },
+        );
       } else {
         await this.sock.sendMessage(jid, { text: prefixed });
       }
@@ -431,8 +472,13 @@ export class WhatsAppChannel implements Channel {
 
   async sendReaction(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
-    emoji: string
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
   ): Promise<void> {
     if (!this.connected) {
       logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
@@ -448,7 +494,7 @@ export class WhatsAppChannel implements Channel {
           messageId: messageKey.id?.slice(0, 10) + '...',
           emoji: emoji || '(removed)',
         },
-        emoji ? 'Reaction sent' : 'Reaction removed'
+        emoji ? 'Reaction sent' : 'Reaction removed',
       );
     } catch (err) {
       logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
@@ -573,7 +619,16 @@ export class WhatsAppChannel implements Channel {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
         if (item.quotedKey) {
-          await this.sock.sendMessage(item.jid, { text: item.text }, { quoted: { key: item.quotedKey, message: { conversation: item.quotedKey.content || '' } } });
+          await this.sock.sendMessage(
+            item.jid,
+            { text: item.text },
+            {
+              quoted: {
+                key: item.quotedKey,
+                message: { conversation: item.quotedKey.content || '' },
+              },
+            },
+          );
         } else {
           await this.sock.sendMessage(item.jid, { text: item.text });
         }
