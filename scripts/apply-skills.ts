@@ -208,6 +208,12 @@ async function main() {
   // changes to ipc-mcp-stdio.ts would otherwise remain stale in live sessions.
   syncAgentRunnerSrc();
 
+  // Sync container/skills/ to all existing per-session .claude/skills/ dirs.
+  // container-runner syncs these at container launch, but clean-skills removes
+  // them from container/skills/ after build. This ensures all sessions get the
+  // skill-applied versions and stale/removed skills are cleaned up.
+  syncContainerSkills();
+
   console.log(`Successfully applied ${config.skills.length} skills.`);
 }
 
@@ -238,6 +244,58 @@ function syncAgentRunnerSrc(): void {
 
   if (synced.length > 0) {
     console.log(`Synced agent-runner/src to ${synced.length} session(s).`);
+  }
+}
+
+/**
+ * Sync container/skills/ to all existing per-session .claude/skills/ dirs.
+ * Uses atomic swap (copy to temp, rename) so a mid-copy failure never
+ * leaves a session with an empty or partial skills directory.
+ */
+function syncContainerSkills(): void {
+  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  if (!fs.existsSync(skillsSrc)) return;
+
+  const sessionsDir = path.join(process.cwd(), 'data', 'sessions');
+  if (!fs.existsSync(sessionsDir)) return;
+
+  const synced: string[] = [];
+  for (const session of fs.readdirSync(sessionsDir)) {
+    const skillsDst = path.join(sessionsDir, session, '.claude', 'skills');
+
+    // Verify destination exists and is a real directory (not a symlink or file)
+    if (!fs.existsSync(skillsDst)) continue;
+    const dstStat = fs.lstatSync(skillsDst);
+    if (!dstStat.isDirectory() || dstStat.isSymbolicLink()) continue;
+
+    // Guard against path escape via symlinked session entries
+    const resolvedDst = fs.realpathSync(skillsDst);
+    const resolvedBase = fs.realpathSync(sessionsDir);
+    const rel = path.relative(resolvedBase, resolvedDst);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+
+    // Atomic swap: populate a temp dir, then rename over the original
+    const tmpDst = skillsDst + '.tmp';
+    fs.rmSync(tmpDst, { recursive: true, force: true });
+    fs.mkdirSync(tmpDst, { recursive: true });
+    try {
+      for (const skillDir of fs.readdirSync(skillsSrc)) {
+        const srcDir = path.join(skillsSrc, skillDir);
+        if (!fs.statSync(srcDir).isDirectory()) continue;
+        fs.cpSync(srcDir, path.join(tmpDst, skillDir), { recursive: true });
+      }
+      fs.rmSync(skillsDst, { recursive: true });
+      fs.renameSync(tmpDst, skillsDst);
+      synced.push(session);
+    } catch (err) {
+      // Clean up temp dir on failure; original skills dir is untouched
+      fs.rmSync(tmpDst, { recursive: true, force: true });
+      console.warn(`Failed to sync skills for session ${session}:`, err);
+    }
+  }
+
+  if (synced.length > 0) {
+    console.log(`Synced container skills to ${synced.length} session(s).`);
   }
 }
 
