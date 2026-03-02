@@ -208,6 +208,12 @@ async function main() {
   // changes to ipc-mcp-stdio.ts would otherwise remain stale in live sessions.
   syncAgentRunnerSrc();
 
+  // Sync container/skills/ to all existing per-session .claude/skills/ dirs.
+  // container-runner syncs these at container launch, but clean-skills removes
+  // them from container/skills/ after build. This ensures all sessions get the
+  // skill-applied versions and stale/removed skills are cleaned up.
+  syncContainerSkills();
+
   console.log(`Successfully applied ${config.skills.length} skills.`);
 }
 
@@ -238,6 +244,39 @@ function syncAgentRunnerSrc(): void {
 
   if (synced.length > 0) {
     console.log(`Synced agent-runner/src to ${synced.length} session(s).`);
+  }
+}
+
+/**
+ * Sync container/skills/ to all existing per-session .claude/skills/ dirs.
+ * Replaces the entire skills directory so removed skills don't linger.
+ */
+function syncContainerSkills(): void {
+  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  if (!fs.existsSync(skillsSrc)) return;
+
+  const sessionsDir = path.join(process.cwd(), 'data', 'sessions');
+  if (!fs.existsSync(sessionsDir)) return;
+
+  const synced: string[] = [];
+  for (const session of fs.readdirSync(sessionsDir)) {
+    const skillsDst = path.join(sessionsDir, session, '.claude', 'skills');
+    if (!fs.existsSync(skillsDst)) continue;
+
+    // Remove existing skills and replace with current set
+    for (const entry of fs.readdirSync(skillsDst)) {
+      fs.rmSync(path.join(skillsDst, entry), { recursive: true });
+    }
+    for (const skillDir of fs.readdirSync(skillsSrc)) {
+      const srcDir = path.join(skillsSrc, skillDir);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      fs.cpSync(srcDir, path.join(skillsDst, skillDir), { recursive: true });
+    }
+    synced.push(session);
+  }
+
+  if (synced.length > 0) {
+    console.log(`Synced container skills to ${synced.length} session(s).`);
   }
 }
 
