@@ -1,3 +1,23 @@
+// Clamp setTimeout/setInterval to the max safe 32-bit signed integer to prevent
+// TimeoutOverflowWarning from Baileys' internal session key expiry timers (~365 days).
+const MAX_TIMER_MS = 0x7fff_ffff; // 2^31 - 1 ≈ 24.8 days
+const _origSetTimeout = globalThis.setTimeout;
+const _origSetInterval = globalThis.setInterval;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+globalThis.setTimeout = ((cb: any, ms?: number, ...args: any[]) =>
+  _origSetTimeout(
+    cb,
+    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
+    ...args,
+  )) as typeof setTimeout;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+globalThis.setInterval = ((cb: any, ms?: number, ...args: any[]) =>
+  _origSetInterval(
+    cb,
+    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
+    ...args,
+  )) as typeof setInterval;
+
 import fs from 'fs';
 import path from 'path';
 

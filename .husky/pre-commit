@@ -1,4 +1,9 @@
-npm run format:fix
+# Auto-format staged TypeScript files and re-stage so the commit includes fixes
+STAGED_TS="$(git diff --cached --name-only --diff-filter=ACMR -- '*.ts' | tr '\n' ' ')"
+if [ -n "$STAGED_TS" ]; then
+  npx prettier --write $STAGED_TS
+  echo "$STAGED_TS" | xargs git add
+fi
 
 # Warn if src/ differs from upstream (catches accidental commits of applied state)
 if git remote get-url upstream >/dev/null 2>&1; then
