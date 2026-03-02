@@ -1,0 +1,19 @@
+[pr_reviewer]
+extra_instructions = """\
+This repo uses a patch-queue build model for fork customizations:
+- src/ in git matches upstream exactly
+- All fork-specific changes live as skills in .claude/skills/
+- Each skill has a modify/ directory containing patched copies of upstream files
+- These patches are applied at build time via `npm run build`
+- Files under .claude/skills/*/modify/ are INTENTIONALLY feature-specific
+- Do not flag them as "core wiring" violations or suggest centralizing them
+- The correct review focus for skill PRs: does the skill's SKILL.md, manifest.yaml, and modify/ changes make sense together?
+"""
+
+[pr_code_suggestions]
+extra_instructions = """\
+This repo uses a patch-queue build model for fork customizations:
+- Files under .claude/skills/*/modify/ are intentionally feature-specific patches applied at build time
+- Do not suggest moving feature-specific wiring out of modify/ files into core source
+- These files are expected to contain the full upstream file plus skill-specific additions
+"""
