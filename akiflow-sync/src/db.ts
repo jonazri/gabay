@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 
 export const ENTITIES_V5 = [
   'tasks', 'labels', 'tags', 'time_slots',
-  'calendars', 'accounts', 'settings',
+  'calendars', 'accounts',
 ] as const;
 
 export const ENTITIES_V3 = ['events', 'event_modifiers'] as const;

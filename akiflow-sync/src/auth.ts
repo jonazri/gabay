@@ -50,10 +50,14 @@ export class AkiflowAuth {
   }
 
   async getUserId(): Promise<string> {
-    const resp = await this.fetchWithAuth('https://web.akiflow.com/user/me');
-    if (!resp.ok) throw new Error(`Failed to get user: ${resp.status}`);
-    const data = await resp.json() as { id: string | number };
-    return String(data.id);
+    // Extract user ID from the JWT access token's `sub` claim — no extra API call needed.
+    // The /user/me endpoint is a frontend route requiring cookie auth, not Bearer tokens.
+    const token = await this.getAccessToken();
+    const payload = token.split('.')[1];
+    if (!payload) throw new Error('Invalid access token format');
+    const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8')) as { sub: string };
+    if (!decoded.sub) throw new Error('No sub claim in access token');
+    return decoded.sub;
   }
 
   async authorizePusherChannel(
