@@ -19,8 +19,14 @@ import {
 } from './manifest.js';
 import { loadPathRemap, resolvePathRemap } from './path-remap.js';
 import { mergeFile } from './merge.js';
-import { computeFileHash, readState, recordSkillApplication, writeState } from './state.js';
 import {
+  computeFileHash,
+  readState,
+  recordSkillApplication,
+  writeState,
+} from './state.js';
+import {
+  mergeContainerSecrets,
   mergeDockerComposeServices,
   mergeEnvAdditions,
   mergeNpmDependencies,
@@ -116,11 +122,17 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   try {
     // --- Backup ---
     const filesToBackup = [
-      ...manifest.modifies.map((f) => path.join(projectRoot, resolvePathRemap(f, pathRemap))),
-      ...manifest.adds.map((f) => path.join(projectRoot, resolvePathRemap(f, pathRemap))),
+      ...manifest.modifies.map((f) =>
+        path.join(projectRoot, resolvePathRemap(f, pathRemap)),
+      ),
+      ...manifest.adds.map((f) =>
+        path.join(projectRoot, resolvePathRemap(f, pathRemap)),
+      ),
       ...(manifest.file_ops || [])
         .filter((op) => op.from)
-        .map((op) => path.join(projectRoot, resolvePathRemap(op.from!, pathRemap))),
+        .map((op) =>
+          path.join(projectRoot, resolvePathRemap(op.from!, pathRemap)),
+        ),
       path.join(projectRoot, 'package.json'),
       path.join(projectRoot, 'package-lock.json'),
       path.join(projectRoot, '.env.example'),
@@ -167,7 +179,12 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     for (const relPath of manifest.modifies) {
       const resolvedPath = resolvePathRemap(relPath, pathRemap);
       const currentPath = path.join(projectRoot, resolvedPath);
-      const basePath = path.join(projectRoot, NANOCLAW_DIR, 'base', resolvedPath);
+      const basePath = path.join(
+        projectRoot,
+        NANOCLAW_DIR,
+        'base',
+        resolvedPath,
+      );
       // skillPath uses original relPath — skill packages are never mutated
       const skillPath = path.join(skillDir, 'modify', relPath);
 
@@ -241,6 +258,11 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       );
     }
 
+    if (manifest.structured?.container_secrets) {
+      const crPath = path.join(projectRoot, 'src', 'container-runner.ts');
+      mergeContainerSecrets(crPath, manifest.structured.container_secrets);
+    }
+
     // Run npm install if dependencies were added
     if (
       manifest.structured?.npm_dependencies &&
@@ -259,7 +281,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
           for (const f of addedFiles) {
             try {
               if (fs.existsSync(f)) fs.unlinkSync(f);
-            } catch { /* best effort */ }
+            } catch {
+              /* best effort */
+            }
           }
           restoreBackup();
           clearBackup();
@@ -311,7 +335,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
         for (const f of addedFiles) {
           try {
             if (fs.existsSync(f)) fs.unlinkSync(f);
-          } catch { /* best effort */ }
+          } catch {
+            /* best effort */
+          }
         }
         restoreBackup();
         // Re-read state and remove the skill we just recorded
@@ -345,7 +371,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     for (const f of addedFiles) {
       try {
         if (fs.existsSync(f)) fs.unlinkSync(f);
-      } catch { /* best effort */ }
+      } catch {
+        /* best effort */
+      }
     }
     restoreBackup();
     clearBackup();
@@ -354,4 +382,3 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     releaseLock();
   }
 }
-

@@ -15,6 +15,7 @@ import { mergeFile } from './merge.js';
 import { recordPathRemap } from './path-remap.js';
 import { computeFileHash, readState, writeState } from './state.js';
 import {
+  mergeContainerSecrets,
   mergeDockerComposeServices,
   mergeEnvAdditions,
   mergeNpmDependencies,
@@ -229,9 +230,16 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
     }
 
     // --- Record path remaps from update metadata ---
-    const remapFile = path.join(newCorePath, '.nanoclaw-meta', 'path_remap.yaml');
+    const remapFile = path.join(
+      newCorePath,
+      '.nanoclaw-meta',
+      'path_remap.yaml',
+    );
     if (fs.existsSync(remapFile)) {
-      const remap = parseYaml(fs.readFileSync(remapFile, 'utf-8')) as Record<string, string>;
+      const remap = parseYaml(fs.readFileSync(remapFile, 'utf-8')) as Record<
+        string,
+        string
+      >;
       if (remap && typeof remap === 'object') {
         recordPathRemap(remap);
       }
@@ -248,14 +256,20 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
     const allNpmDeps: Record<string, string> = {};
     const allEnvAdditions: string[] = [];
     const allDockerServices: Record<string, unknown> = {};
+    const allContainerSecrets: string[] = [];
     let hasNpmDeps = false;
 
     for (const skill of state.applied_skills) {
-      const outcomes = skill.structured_outcomes as Record<string, unknown> | undefined;
+      const outcomes = skill.structured_outcomes as
+        | Record<string, unknown>
+        | undefined;
       if (!outcomes) continue;
 
       if (outcomes.npm_dependencies) {
-        Object.assign(allNpmDeps, outcomes.npm_dependencies as Record<string, string>);
+        Object.assign(
+          allNpmDeps,
+          outcomes.npm_dependencies as Record<string, string>,
+        );
         hasNpmDeps = true;
       }
       if (outcomes.env_additions) {
@@ -266,6 +280,9 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
           allDockerServices,
           outcomes.docker_compose_services as Record<string, unknown>,
         );
+      }
+      if (outcomes.container_secrets) {
+        allContainerSecrets.push(...(outcomes.container_secrets as string[]));
       }
     }
 
@@ -284,6 +301,11 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
       mergeDockerComposeServices(composePath, allDockerServices);
     }
 
+    if (allContainerSecrets.length > 0) {
+      const crPath = path.join(projectRoot, 'src', 'container-runner.ts');
+      mergeContainerSecrets(crPath, allContainerSecrets);
+    }
+
     if (hasNpmDeps) {
       runNpmInstall();
     }
@@ -292,7 +314,9 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
     const skillReapplyResults: Record<string, boolean> = {};
 
     for (const skill of state.applied_skills) {
-      const outcomes = skill.structured_outcomes as Record<string, unknown> | undefined;
+      const outcomes = skill.structured_outcomes as
+        | Record<string, unknown>
+        | undefined;
       if (!outcomes?.test) continue;
 
       const testCmd = outcomes.test as string;
@@ -339,4 +363,3 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
     releaseLock();
   }
 }
-

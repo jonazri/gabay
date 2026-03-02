@@ -6,6 +6,9 @@ adds: []
 modifies:
   - src/group-queue.ts
   - src/container-runner.ts
+structured:
+  container_secrets:
+    - OPENAI_API_KEY
 conflicts: []
 depends: []
 test: "npx tsc --noEmit"

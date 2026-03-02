@@ -270,8 +270,6 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
-    'OPENAI_API_KEY',
-    'PERPLEXITY_API_KEY',
   ]);
 }
 

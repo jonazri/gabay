@@ -9,6 +9,7 @@ import { readManifest } from './manifest.js';
 import { mergeFile } from './merge.js';
 import { loadPathRemap, resolvePathRemap } from './path-remap.js';
 import {
+  mergeContainerSecrets,
   mergeDockerComposeServices,
   mergeEnvAdditions,
   mergeNpmDependencies,
@@ -112,6 +113,7 @@ export async function replaySkills(
   const allNpmDeps: Record<string, string> = {};
   const allEnvAdditions: string[] = [];
   const allDockerServices: Record<string, unknown> = {};
+  const allContainerSecrets: string[] = [];
   let hasNpmDeps = false;
 
   for (const skillName of options.skills) {
@@ -224,8 +226,20 @@ export async function replaySkills(
             skillConflicts.push(resolvedPath);
           }
         } finally {
-          if (tmpBase) { try { fs.unlinkSync(tmpBase); } catch { /* ignore */ } }
-          if (tmpCurrent) { try { fs.unlinkSync(tmpCurrent); } catch { /* ignore */ } }
+          if (tmpBase) {
+            try {
+              fs.unlinkSync(tmpBase);
+            } catch {
+              /* ignore */
+            }
+          }
+          if (tmpCurrent) {
+            try {
+              fs.unlinkSync(tmpCurrent);
+            } catch {
+              /* ignore */
+            }
+          }
         }
       }
 
@@ -254,6 +268,9 @@ export async function replaySkills(
           allDockerServices,
           manifest.structured.docker_compose_services,
         );
+      }
+      if (manifest.structured?.container_secrets) {
+        allContainerSecrets.push(...manifest.structured.container_secrets);
       }
     } catch (err) {
       perSkill[skillName] = {
@@ -291,6 +308,11 @@ export async function replaySkills(
   if (Object.keys(allDockerServices).length > 0) {
     const composePath = path.join(projectRoot, 'docker-compose.yml');
     mergeDockerComposeServices(composePath, allDockerServices);
+  }
+
+  if (allContainerSecrets.length > 0) {
+    const crPath = path.join(projectRoot, 'src', 'container-runner.ts');
+    mergeContainerSecrets(crPath, allContainerSecrets);
   }
 
   // 5. Run npm install if any deps

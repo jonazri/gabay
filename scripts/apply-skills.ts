@@ -191,7 +191,16 @@ async function main() {
         fileHashes[resolvedPath] = computeFileHash(fullPath);
       }
     }
-    recordSkillApplication(manifest.skill, manifest.version, fileHashes);
+    const outcomes: Record<string, unknown> = manifest.structured
+      ? { ...manifest.structured }
+      : {};
+    if (manifest.test) outcomes.test = manifest.test;
+    recordSkillApplication(
+      manifest.skill,
+      manifest.version,
+      fileHashes,
+      Object.keys(outcomes).length > 0 ? outcomes : undefined,
+    );
   }
 
   // Sync container/agent-runner/src/ to all existing per-session mount dirs.

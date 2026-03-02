@@ -9,6 +9,7 @@ export interface SkillManifest {
     npm_dependencies?: Record<string, string>;
     env_additions?: string[];
     docker_compose_services?: Record<string, unknown>;
+    container_secrets?: string[];
   };
   file_ops?: FileOperation[];
   modify_base?: Record<string, string>;
