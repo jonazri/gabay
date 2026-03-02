@@ -4,8 +4,15 @@ import yaml from 'yaml';
 import { initNanoclawDir } from '../skills-engine/init.js';
 import { readManifest } from '../skills-engine/manifest.js';
 import { replaySkills, findSkillDir } from '../skills-engine/replay.js';
-import { computeFileHash, readState, recordSkillApplication } from '../skills-engine/state.js';
-import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
+import {
+  computeFileHash,
+  readState,
+  recordSkillApplication,
+} from '../skills-engine/state.js';
+import {
+  loadPathRemap,
+  resolvePathRemap,
+} from '../skills-engine/path-remap.js';
 import {
   areRangesCompatible,
   mergeNpmDependencies,
@@ -50,7 +57,9 @@ function restoreRuntimeFiles(
   }
 
   if (restored.length > 0) {
-    console.log(`Restored ${restored.length} runtime file(s): ${restored.join(', ')}`);
+    console.log(
+      `Restored ${restored.length} runtime file(s): ${restored.join(', ')}`,
+    );
   }
 }
 
@@ -141,14 +150,18 @@ async function main() {
   try {
     const state = readState();
     if (state.applied_skills.length > 0) {
-      console.log(`Skills already applied (${state.applied_skills.length} skills). Use clean-skills first to re-apply.`);
+      console.log(
+        `Skills already applied (${state.applied_skills.length} skills). Use clean-skills first to re-apply.`,
+      );
       process.exit(0);
     }
   } catch {
     // No state yet — fresh apply
   }
 
-  console.log(`Applying ${config.skills.length} skills: ${config.skills.join(', ')}`);
+  console.log(
+    `Applying ${config.skills.length} skills: ${config.skills.join(', ')}`,
+  );
 
   // Apply sequentially using replaySkills
   const result = await replaySkills({
@@ -181,7 +194,42 @@ async function main() {
     recordSkillApplication(manifest.skill, manifest.version, fileHashes);
   }
 
+  // Sync container/agent-runner/src/ to all existing per-session mount dirs.
+  // container-runner only copies this once at first container launch, so skill
+  // changes to ipc-mcp-stdio.ts would otherwise remain stale in live sessions.
+  syncAgentRunnerSrc();
+
   console.log(`Successfully applied ${config.skills.length} skills.`);
+}
+
+function syncAgentRunnerSrc(): void {
+  const agentRunnerSrc = path.join(
+    process.cwd(),
+    'container',
+    'agent-runner',
+    'src',
+  );
+  if (!fs.existsSync(agentRunnerSrc)) return;
+
+  const sessionsDir = path.join(process.cwd(), 'data', 'sessions');
+  if (!fs.existsSync(sessionsDir)) return;
+
+  const synced: string[] = [];
+  for (const session of fs.readdirSync(sessionsDir)) {
+    const mountDir = path.join(sessionsDir, session, 'agent-runner-src');
+    if (!fs.existsSync(mountDir)) continue;
+    for (const file of fs.readdirSync(agentRunnerSrc)) {
+      fs.copyFileSync(
+        path.join(agentRunnerSrc, file),
+        path.join(mountDir, file),
+      );
+    }
+    synced.push(session);
+  }
+
+  if (synced.length > 0) {
+    console.log(`Synced agent-runner/src to ${synced.length} session(s).`);
+  }
 }
 
 main().catch((err) => {
