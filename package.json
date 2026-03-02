@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsx scripts/apply-skills.ts && tsc && tsx scripts/clean-skills.ts --force",
+    "build": "tsx scripts/apply-skills.ts && tsc && tsx scripts/clean-skills.ts --force && tsx scripts/apply-skills.ts --deps-only",
     "build:quick": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx scripts/apply-skills.ts && tsx watch src/index.ts",
