@@ -10,10 +10,6 @@ modifies:
 modify_base:
   src/container-runner.ts: _accumulated
   container/Dockerfile: _accumulated
-conflicts:
-  - akiflow
-incompatible_with:
-  - akiflow
 depends:
   - auth-recovery
   - container-hardening
