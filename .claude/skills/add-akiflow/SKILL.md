@@ -31,9 +31,17 @@ To get the refresh token: open Akiflow desktop app DevTools → Network tab → 
 
 ## Install
 
+**Fresh install:**
+
 ```bash
-# 1. Add to installed-skills.yaml (already done if you're reading this via npm run build)
+# 1. Add 'akiflow' to .nanoclaw/installed-skills.yaml (after perplexity-research)
 # 2. Ensure AKIFLOW_REFRESH_TOKEN is in .env
-# 3. Build
+npm run build
+```
+
+**If already registered in installed-skills.yaml:**
+
+```bash
+# Just ensure AKIFLOW_REFRESH_TOKEN is in .env, then:
 npm run build
 ```
