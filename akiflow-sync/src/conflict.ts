@@ -15,13 +15,14 @@ export function resolveAndUpsert(ctx: ConflictCtx, remote: ApiEntity): void {
   }
 
   const remoteTs = toMs(remote.global_updated_at as string | null);
-  const localTs = local.global_updated_at ?? 0;
+  // Locally-written rows have updated_at set but global_updated_at null (not yet confirmed by server).
+  // Use updated_at as fallback so optimistic local writes can win against a stale remote.
+  const localTs = local.global_updated_at ?? local.updated_at ?? 0;
 
   if (remoteTs > localTs) {
     // Remote wins globally — apply, but protect locally-newer fields for tasks
-    const entity = ctx.table === 'tasks'
-      ? protectLocalFields(remote, local.data)
-      : remote;
+    const entity =
+      ctx.table === 'tasks' ? protectLocalFields(remote, local.data) : remote;
     upsertEntity(ctx.db, ctx.table, entity);
   } else {
     // Local wins globally — keep local, but apply remotely-newer fields for tasks
@@ -32,7 +33,10 @@ export function resolveAndUpsert(ctx: ConflictCtx, remote: ApiEntity): void {
 }
 
 /** When remote wins globally: preserve local field values that are newer. */
-function protectLocalFields(remote: ApiEntity, localDataJson: string): ApiEntity {
+function protectLocalFields(
+  remote: ApiEntity,
+  localDataJson: string,
+): ApiEntity {
   const local = JSON.parse(localDataJson) as Record<string, unknown>;
   const entity = { ...remote };
 

@@ -1,12 +1,7 @@
 import { createRequire } from 'module';
 import { config } from 'dotenv';
 import { resolve } from 'path';
-import {
-  initDb,
-  ENTITIES_V5,
-  ENTITIES_V3,
-  type EntityV3,
-} from './db.js';
+import { initDb, ENTITIES_V5, ENTITIES_V3, type EntityV3 } from './db.js';
 import { AkiflowAuth } from './auth.js';
 import { syncV5Entity } from './sync/v5.js';
 import { syncV3Entity } from './sync/v3.js';
@@ -25,7 +20,10 @@ const PUSHER_CLUSTER = 'eu';
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const PusherCtor = require('pusher-js') as {
-  new (key: string, options: Options): {
+  new (
+    key: string,
+    options: Options,
+  ): {
     subscribe(channelName: string): Channel;
     connection: {
       bind(event: string, callback: (...args: unknown[]) => void): void;
@@ -46,11 +44,15 @@ async function main(): Promise<void> {
   const auth = new AkiflowAuth(refreshToken, envPath);
 
   // Reset any rows stuck in 'processing' from a previous crash
-  const stuck = db.prepare(
-    "UPDATE pending_writes SET status = 'pending' WHERE status = 'processing'"
-  ).run();
+  const stuck = db
+    .prepare(
+      "UPDATE pending_writes SET status = 'pending' WHERE status = 'processing'",
+    )
+    .run();
   if (stuck.changes > 0) {
-    logger.warn(`[daemon] reset ${stuck.changes} stuck 'processing' row(s) to 'pending'`);
+    logger.warn(
+      `[daemon] reset ${stuck.changes} stuck 'processing' row(s) to 'pending'`,
+    );
   }
 
   logger.info('[daemon] running initial sync of all entities');
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
         callback: ChannelAuthorizationCallback,
       ) => {
         auth.authorizePusherChannel(params.channelName, params.socketId).then(
-          data => callback(null, data),
+          (data) => callback(null, data),
           (e: Error) => callback(e, null),
         );
       },
@@ -80,35 +82,50 @@ async function main(): Promise<void> {
 
   const channel = pusher.subscribe(`private-user.${userId}`);
 
-  channel.bind('connector-updated', async (data: { syncEntities?: string[] }) => {
-    const entities = data?.syncEntities;
-    if (entities?.length) {
-      logger.info(`[pusher] incremental sync triggered for: ${entities.join(', ')}`);
-      await syncEntities(db, auth, entities);
-    } else {
-      logger.info('[pusher] full sync triggered');
-      await syncAllEntities(db, auth);
-    }
-  });
+  channel.bind(
+    'connector-updated',
+    async (data: { syncEntities?: string[] }) => {
+      try {
+        const entities = data?.syncEntities;
+        if (entities?.length) {
+          logger.info(
+            `[pusher] incremental sync triggered for: ${entities.join(', ')}`,
+          );
+          await syncEntities(db, auth, entities);
+        } else {
+          logger.info('[pusher] full sync triggered');
+          await syncAllEntities(db, auth);
+        }
+      } catch (e) {
+        logger.error('[pusher] sync error:', e);
+      }
+    },
+  );
 
   channel.bind('account-connected', () =>
-    syncAllEntities(db, auth).catch(e => logger.error('[pusher] sync error:', e))
+    syncAllEntities(db, auth).catch((e) =>
+      logger.error('[pusher] sync error:', e),
+    ),
   );
   channel.bind('account-disconnected', () =>
-    syncAllEntities(db, auth).catch(e => logger.error('[pusher] sync error:', e))
+    syncAllEntities(db, auth).catch((e) =>
+      logger.error('[pusher] sync error:', e),
+    ),
   );
   channel.bind('user-update', () =>
-    syncV5Entity(db, 'accounts', auth).catch(e => logger.error('[pusher] sync error:', e))
+    syncV5Entity(db, 'accounts', auth).catch((e) =>
+      logger.error('[pusher] sync error:', e),
+    ),
   );
 
   pusher.connection.bind('connected', () =>
-    logger.info(`[pusher] connected to private-user.${userId}`)
+    logger.info(`[pusher] connected to private-user.${userId}`),
   );
   pusher.connection.bind('disconnected', () =>
-    logger.warn('[pusher] disconnected — will auto-reconnect')
+    logger.warn('[pusher] disconnected — will auto-reconnect'),
   );
   pusher.connection.bind('error', (e: unknown) =>
-    logger.error('[pusher] connection error:', e)
+    logger.error('[pusher] connection error:', e),
   );
 
   logger.info('[daemon] ready');
@@ -119,15 +136,15 @@ async function syncAllEntities(
   auth: AkiflowAuth,
 ): Promise<void> {
   await Promise.all([
-    ...ENTITIES_V5.map(e =>
-      syncV5Entity(db, e, auth).catch(err =>
-        logger.error(`[daemon] V5 sync failed for ${e}:`, err)
-      )
+    ...ENTITIES_V5.map((e) =>
+      syncV5Entity(db, e, auth).catch((err) =>
+        logger.error(`[daemon] V5 sync failed for ${e}:`, err),
+      ),
     ),
-    ...ENTITIES_V3.map(e =>
-      syncV3Entity(db, e as EntityV3, auth).catch(err =>
-        logger.error(`[daemon] V3 sync failed for ${e}:`, err)
-      )
+    ...ENTITIES_V3.map((e) =>
+      syncV3Entity(db, e as EntityV3, auth).catch((err) =>
+        logger.error(`[daemon] V3 sync failed for ${e}:`, err),
+      ),
     ),
   ]);
 }
@@ -138,22 +155,22 @@ async function syncEntities(
   entities: string[],
 ): Promise<void> {
   await Promise.all(
-    entities.map(e => {
+    entities.map((e) => {
       if ((ENTITIES_V5 as readonly string[]).includes(e))
-        return syncV5Entity(db, e, auth).catch(err =>
-          logger.error(`[daemon] sync failed for ${e}:`, err)
+        return syncV5Entity(db, e, auth).catch((err) =>
+          logger.error(`[daemon] sync failed for ${e}:`, err),
         );
       if ((ENTITIES_V3 as readonly string[]).includes(e))
-        return syncV3Entity(db, e as EntityV3, auth).catch(err =>
-          logger.error(`[daemon] sync failed for ${e}:`, err)
+        return syncV3Entity(db, e as EntityV3, auth).catch((err) =>
+          logger.error(`[daemon] sync failed for ${e}:`, err),
         );
       logger.warn(`[daemon] unknown entity in Pusher message: ${e}`);
       return Promise.resolve();
-    })
+    }),
   );
 }
 
-main().catch(e => {
+main().catch((e) => {
   logger.error('[daemon] fatal error:', e);
   process.exit(1);
 });

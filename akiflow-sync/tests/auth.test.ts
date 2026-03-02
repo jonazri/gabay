@@ -5,9 +5,9 @@ import { AkiflowAuth } from '../src/auth.js';
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-// Build a minimal fake JWT with the given sub claim
+// Build a minimal fake JWT with the given sub claim (base64url-encoded, matching real JWTs)
 const makeJwt = (sub: string): string =>
-  `x.${Buffer.from(JSON.stringify({ sub })).toString('base64')}.x`;
+  `x.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.x`;
 
 describe('AkiflowAuth', () => {
   beforeEach(() => {
@@ -52,13 +52,19 @@ describe('AkiflowAuth', () => {
   it('throws on failed token refresh', async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 });
     const auth = new AkiflowAuth('bad-token', '/tmp/test.env');
-    await expect(auth.getAccessToken()).rejects.toThrow('Token refresh failed: 401');
+    await expect(auth.getAccessToken()).rejects.toThrow(
+      'Token refresh failed: 401',
+    );
   });
 
   it('extracts user ID from JWT sub claim', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ access_token: makeJwt('12345'), refresh_token: 'r', expires_in: 1800 }),
+      json: async () => ({
+        access_token: makeJwt('12345'),
+        refresh_token: 'r',
+        expires_in: 1800,
+      }),
     });
 
     const auth = new AkiflowAuth('refresh', '/tmp/test.env');
@@ -72,7 +78,11 @@ describe('AkiflowAuth', () => {
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ access_token: 'tok', refresh_token: 'r', expires_in: 1800 }),
+        json: async () => ({
+          access_token: 'tok',
+          refresh_token: 'r',
+          expires_in: 1800,
+        }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -80,13 +90,19 @@ describe('AkiflowAuth', () => {
       });
 
     const auth = new AkiflowAuth('refresh', '/tmp/test.env');
-    const result = await auth.authorizePusherChannel('private-user.123', 'socket-id-abc');
+    const result = await auth.authorizePusherChannel(
+      'private-user.123',
+      'socket-id-abc',
+    );
     expect(result.auth).toBe('channel-auth-string');
     expect(mockFetch).toHaveBeenCalledWith(
       'https://web.akiflow.com/api/pusherAuth',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ channel_name: 'private-user.123', socket_id: 'socket-id-abc' }),
+        body: JSON.stringify({
+          channel_name: 'private-user.123',
+          socket_id: 'socket-id-abc',
+        }),
       }),
     );
   });
@@ -96,14 +112,22 @@ describe('AkiflowAuth', () => {
       // Initial token fetch
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ access_token: makeJwt('42'), refresh_token: 'r', expires_in: 1800 }),
+        json: async () => ({
+          access_token: makeJwt('42'),
+          refresh_token: 'r',
+          expires_in: 1800,
+        }),
       })
       // Pusher auth call returns 401
       .mockResolvedValueOnce({ ok: false, status: 401 })
       // Token refresh
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ access_token: makeJwt('42'), refresh_token: 'r', expires_in: 1800 }),
+        json: async () => ({
+          access_token: makeJwt('42'),
+          refresh_token: 'r',
+          expires_in: 1800,
+        }),
       })
       // Retry succeeds
       .mockResolvedValueOnce({
@@ -112,7 +136,10 @@ describe('AkiflowAuth', () => {
       });
 
     const auth = new AkiflowAuth('refresh', '/tmp/test.env');
-    const result = await auth.authorizePusherChannel('private-user.42', 'socket-id');
+    const result = await auth.authorizePusherChannel(
+      'private-user.42',
+      'socket-id',
+    );
     expect(result.auth).toBe('retry-auth');
   });
 });

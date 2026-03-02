@@ -32,11 +32,14 @@ export class AkiflowAuth {
     const resp = await fetch('https://web.akiflow.com/oauth/refreshToken', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: '1', refresh_token: this.refreshToken }),
+      body: JSON.stringify({
+        client_id: '1',
+        refresh_token: this.refreshToken,
+      }),
     });
     if (!resp.ok) throw new Error(`Token refresh failed: ${resp.status}`);
 
-    const data = await resp.json() as TokenResponse;
+    const data = (await resp.json()) as TokenResponse;
     this.accessToken = data.access_token;
     this.tokenExpiresAt = Date.now() + data.expires_in * 1000;
 
@@ -55,7 +58,10 @@ export class AkiflowAuth {
     const token = await this.getAccessToken();
     const payload = token.split('.')[1];
     if (!payload) throw new Error('Invalid access token format');
-    const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8')) as { sub: string };
+    // JWTs use base64url (unpadded, with - and _ instead of + and /); Node supports this natively.
+    const decoded = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf-8'),
+    ) as { sub: string };
     if (!decoded.sub) throw new Error('No sub claim in access token');
     return decoded.sub;
   }
@@ -69,18 +75,27 @@ export class AkiflowAuth {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_name: channelName, socket_id: socketId }),
+        body: JSON.stringify({
+          channel_name: channelName,
+          socket_id: socketId,
+        }),
       },
     );
     if (!resp.ok) throw new Error(`Pusher auth failed: ${resp.status}`);
     return resp.json() as Promise<PusherAuthResponse>;
   }
 
-  async fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+  async fetchWithAuth(
+    url: string,
+    options: RequestInit = {},
+  ): Promise<Response> {
     const token = await this.getAccessToken();
     const resp = await fetch(url, {
       ...options,
-      headers: { ...options.headers as Record<string, string>, Authorization: `Bearer ${token}` },
+      headers: {
+        ...(options.headers as Record<string, string>),
+        Authorization: `Bearer ${token}`,
+      },
     });
 
     if (resp.status === 401) {
@@ -88,7 +103,10 @@ export class AkiflowAuth {
       const newToken = await this.getAccessToken();
       return fetch(url, {
         ...options,
-        headers: { ...options.headers as Record<string, string>, Authorization: `Bearer ${newToken}` },
+        headers: {
+          ...(options.headers as Record<string, string>),
+          Authorization: `Bearer ${newToken}`,
+        },
       });
     }
 
