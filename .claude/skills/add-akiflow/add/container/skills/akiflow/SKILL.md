@@ -21,12 +21,12 @@ Full task and calendar management via the Akiflow API.
 | Concept | Notes |
 |---|---|
 | **Inbox** (status 1) | New unscheduled tasks. Default for newly created tasks. |
-| **Planned** (status 2) | Has a `date` assigned. With `date` only → appears as a to-do. With `date` + `dateTime` → appears on calendar. |
-| **Completed** (status 3) | Done. Set `done: true`, `doneAt: <epoch ms>`, `status: 3`. |
+| **Planned** (status 2) | Has a `date` assigned. With `date` only → appears as a to-do. With `date` + `datetime` → appears on calendar. |
+| **Completed** (status 3) | Done. Set `done: true`, `done_at: <epoch ms>`, `status: 3`. |
 | **Snoozed** (status 4) | Temporarily hidden. |
 | **Someday** (status 7) | "Maybe later" — no date, no active pressure. |
-| **Labels** | Both **projects** (`isTag: false`) and **tags** (`isTag: true`). `labelId` = primary project, `labelIds` = array of tag UUIDs. |
-| **Time Slots** | Calendar containers for activity types (e.g., "Deep Work", "Admin"). Hold tasks, not events. Tasks reference them via `timeSlotId`. |
+| **Labels** | Both **projects** (`is_tag: false`) and **tags** (`is_tag: true`). `label_id` = primary project, `tags_ids` = array of tag UUIDs. |
+| **Time Slots** | Calendar containers for activity types (e.g., "Deep Work", "Admin"). Hold tasks, not events. Tasks reference them via `time_slot_id`. |
 | **Events** | Calendar events (meetings, appointments) from connected Google/Outlook accounts. Use v3 API. |
 
 **Always call `akiflow:list-labels` first** if you need to assign a project or tag — you need the UUID.
@@ -62,21 +62,41 @@ Token is cached for 25 minutes in `/tmp/akiflow_token`. Refresh tokens rotate �
 
 ## Tasks
 
+### Pagination helper (internal)
+
+The v5 tasks API returns 250 tasks per page. This helper fetches all pages and returns a flat JSON array.
+
+```bash
+akiflow:_fetch-all-tasks() {
+  local token=""
+  local all_tasks="[]"
+  local response has_next
+  while true; do
+    response=$(curl -sf "https://api.akiflow.com/v5/tasks?sync_token=${token}" \
+      -H "Authorization: Bearer $(akiflow:token)") || return 1
+    all_tasks=$(echo "$all_tasks" | jq --argjson page "$(echo "$response" | jq '.data')" '. + $page') || return 1
+    has_next=$(echo "$response" | jq -r '.has_next_page // false')
+    [[ "$has_next" == "true" ]] || break
+    token=$(echo "$response" | jq -r '.sync_token // ""')
+    [[ -z "$token" ]] && break
+  done
+  echo "$all_tasks"
+}
+```
+
 ### List all active tasks
 ```bash
 akiflow:list-all() {
-  curl -sf "https://api.akiflow.com/v5/tasks?sync_token=" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    | jq '[.data[] | select(.done == false and .deletedAt == null and (.status == 1 or .status == 2 or .status == 4 or .status == 7))]'
+  akiflow:_fetch-all-tasks \
+    | jq '[.[] | select(.done == false and .deleted_at == null and (.status == 1 or .status == 2 or .status == 4 or .status == 7))]'
 }
 ```
 
 ### List inbox tasks (unscheduled)
 ```bash
 akiflow:list-inbox() {
-  curl -sf "https://api.akiflow.com/v5/tasks?sync_token=" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    | jq '[.data[] | select(.done == false and .deletedAt == null and .status == 1)]'
+  akiflow:_fetch-all-tasks \
+    | jq '[.[] | select(.done == false and .deleted_at == null and .status == 1)]'
 }
 ```
 
@@ -85,9 +105,8 @@ akiflow:list-inbox() {
 akiflow:list-today() {
   local today
   today=$(date +%Y-%m-%d)
-  curl -sf "https://api.akiflow.com/v5/tasks?sync_token=" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    | jq --arg today "$today" '[.data[] | select(.done == false and .deletedAt == null and .date == $today)]'
+  akiflow:_fetch-all-tasks \
+    | jq --arg today "$today" '[.[] | select(.done == false and .deleted_at == null and .date == $today)]'
 }
 ```
 
@@ -102,19 +121,17 @@ akiflow:list-upcoming() {
   local end_date today
   end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d)
   today=$(date +%Y-%m-%d)
-  curl -sf "https://api.akiflow.com/v5/tasks?sync_token=" \
-    -H "Authorization: Bearer $(akiflow:token)" \
+  akiflow:_fetch-all-tasks \
     | jq --arg start "$today" --arg end "$end_date" \
-        '[.data[] | select(.done == false and .deletedAt == null and .date != null and .date >= $start and .date <= $end)]'
+        '[.[] | select(.done == false and .deleted_at == null and .date != null and .date >= $start and .date <= $end)]'
 }
 ```
 
 ### List someday tasks
 ```bash
 akiflow:list-someday() {
-  curl -sf "https://api.akiflow.com/v5/tasks?sync_token=" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    | jq '[.data[] | select(.done == false and .deletedAt == null and .status == 7)]'
+  akiflow:_fetch-all-tasks \
+    | jq '[.[] | select(.done == false and .deleted_at == null and .status == 7)]'
 }
 ```
 
@@ -122,9 +139,8 @@ akiflow:list-someday() {
 ```bash
 akiflow:search-tasks() {
   local query="$1"
-  curl -sf "https://api.akiflow.com/v5/tasks?sync_token=" \
-    -H "Authorization: Bearer $(akiflow:token)" \
-    | jq --arg q "$query" '[.data[] | select(.done == false and .deletedAt == null and (.title | ascii_downcase | contains($q | ascii_downcase)))]'
+  akiflow:_fetch-all-tasks \
+    | jq --arg q "$query" '[.[] | select(.done == false and .deleted_at == null and (.title | ascii_downcase | contains($q | ascii_downcase)))]'
 }
 ```
 
@@ -136,13 +152,13 @@ Pass a JSON object. Required: `title`. Optional fields:
 |---|---|---|
 | `status` | number | Default 1 (INBOX). Use 2 (PLANNED) with a `date`. |
 | `date` | string | ISO date: `"2026-03-05"` |
-| `dateTime` | number | Epoch ms for specific time |
+| `datetime` | number | Epoch ms for specific time |
 | `duration` | number | Minutes |
 | `priority` | number | 0=none, 1=low, 2=medium, 3=high, 4=goal |
-| `labelId` | string | Primary project UUID |
-| `labelIds` | string[] | Additional tag UUIDs |
+| `label_id` | string | Primary project UUID |
+| `tags_ids` | string[] | Additional tag UUIDs |
 | `description` | string | Rich text notes |
-| `originUrl` | string | Link to source (email, web page, etc.) |
+| `origin_url` | string | Link to source (email, web page, etc.) |
 
 ```bash
 akiflow:create-task() {
@@ -164,10 +180,10 @@ akiflow:create-task() {
 akiflow:create-task '{"title": "Buy groceries"}'
 
 # Planned for a date with priority and project
-akiflow:create-task '{"title": "Review PR", "date": "2026-03-03", "status": 2, "priority": 2, "labelId": "project-uuid"}'
+akiflow:create-task '{"title": "Review PR", "date": "2026-03-03", "status": 2, "priority": 2, "label_id": "project-uuid"}'
 
 # Task with link, tags, and description
-akiflow:create-task '{"title": "Read this article", "originUrl": "https://example.com", "labelIds": ["tag-uuid"], "description": "Important context"}'
+akiflow:create-task '{"title": "Read this article", "origin_url": "https://example.com", "tags_ids": ["tag-uuid"], "description": "Important context"}'
 ```
 
 ### Update a task
@@ -193,19 +209,19 @@ akiflow:update-task() {
 akiflow:update-task "task-uuid" '{"date": "2026-03-05", "status": 2}'
 
 # Set high priority and assign to project
-akiflow:update-task "task-uuid" '{"priority": 3, "labelId": "project-uuid"}'
+akiflow:update-task "task-uuid" '{"priority": 3, "label_id": "project-uuid"}'
 
 # Add tags
-akiflow:update-task "task-uuid" '{"labelIds": ["tag-uuid-1", "tag-uuid-2"]}'
+akiflow:update-task "task-uuid" '{"tags_ids": ["tag-uuid-1", "tag-uuid-2"]}'
 
 # Add URL and description
-akiflow:update-task "task-uuid" '{"originUrl": "https://example.com", "description": "Notes here"}'
+akiflow:update-task "task-uuid" '{"origin_url": "https://example.com", "description": "Notes here"}'
 
 # Move to someday (remove date)
-akiflow:update-task "task-uuid" '{"status": 7, "date": null, "dateTime": null}'
+akiflow:update-task "task-uuid" '{"status": 7, "date": null, "datetime": null}'
 
 # Assign to a time slot
-akiflow:update-task "task-uuid" '{"timeSlotId": "slot-uuid"}'
+akiflow:update-task "task-uuid" '{"time_slot_id": "slot-uuid"}'
 ```
 
 ### Complete a task
@@ -217,7 +233,7 @@ akiflow:complete-task() {
   curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
-    -d "[{\"id\":\"$id\",\"done\":true,\"doneAt\":$now_ms,\"status\":3}]" | jq '.data[0]'
+    -d "[{\"id\":\"$id\",\"done\":true,\"done_at\":$now_ms,\"status\":3}]" | jq '.data[0]'
 }
 ```
 
@@ -230,7 +246,7 @@ akiflow:delete-task() {
   curl -sf -X PATCH "https://api.akiflow.com/v5/tasks" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
-    -d "[{\"id\":\"$id\",\"status\":6,\"deletedAt\":$now_ms}]" | jq '.data[0]'
+    -d "[{\"id\":\"$id\",\"status\":6,\"deleted_at\":$now_ms}]" | jq '.data[0]'
 }
 ```
 
@@ -241,13 +257,13 @@ akiflow:delete-task() {
 akiflow:list-labels() {
   curl -sf "https://api.akiflow.com/v5/labels?sync_token=" \
     -H "Authorization: Bearer $(akiflow:token)" \
-    | jq '[.data[] | select(.deletedAt == null)] | sort_by(.sorting)'
+    | jq '[.data[] | select(.deleted_at == null)] | sort_by(.sorting)'
 }
 ```
 
-Response fields: `id`, `name`, `color` (hex), `isTag` (false=project, true=tag), `folderId` (optional folder grouping).
+Response fields: `id`, `name`, `color` (hex), `is_tag` (false=project, true=tag), `folder_id` (optional folder grouping).
 
-Use `isTag: false` to filter just projects; `isTag: true` for tags.
+Use `is_tag: false` to filter just projects; `is_tag: true` for tags.
 
 ## Calendars & Events
 
@@ -321,13 +337,13 @@ akiflow:delete-event() {
   curl -sf -X POST "https://api.akiflow.com/v3/events" \
     -H "Authorization: Bearer $(akiflow:token)" \
     -H "Content-Type: application/json" \
-    -d "{\"id\":\"$id\",\"deletedAt\":$now_ms}" | jq '.data // .'
+    -d "{\"id\":\"$id\",\"deleted_at\":$now_ms}" | jq '.data // .'
 }
 ```
 
 ## Time Slots
 
-Time Slots are calendar containers for organizing tasks by activity type (e.g., "Deep Work", "Admin"). They appear on the calendar but hold tasks — not appointments. Tasks are assigned to slots via `timeSlotId`.
+Time Slots are calendar containers for organizing tasks by activity type (e.g., "Deep Work", "Admin"). They appear on the calendar but hold tasks — not appointments. Tasks are assigned to slots via `time_slot_id`.
 
 See: [Time Slots docs](https://product.akiflow.com/help/articles/3089241-time-slots)
 
@@ -336,7 +352,7 @@ See: [Time Slots docs](https://product.akiflow.com/help/articles/3089241-time-sl
 akiflow:list-slots() {
   curl -sf "https://api.akiflow.com/v5/time_slots?sync_token=" \
     -H "Authorization: Bearer $(akiflow:token)" \
-    | jq '[.data[] | select(.deletedAt == null)]'
+    | jq '[.data[] | select(.deleted_at == null)]'
 }
 ```
 
@@ -346,19 +362,19 @@ akiflow:list-slots-today() {
   local date="${1:-$(date +%Y-%m-%d)}"
   curl -sf "https://api.akiflow.com/v5/time_slots?sync_token=" \
     -H "Authorization: Bearer $(akiflow:token)" \
-    | jq --arg date "$date" '[.data[] | select(.deletedAt == null and .date == $date)]'
+    | jq --arg date "$date" '[.data[] | select(.deleted_at == null and .date == $date)]'
 }
 ```
 
-To assign a task to a slot: `akiflow:update-task "task-uuid" '{"timeSlotId": "slot-uuid"}'`
+To assign a task to a slot: `akiflow:update-task "task-uuid" '{"time_slot_id": "slot-uuid"}'`
 
 > **Note:** Creating/updating time slots follows the v5 PATCH pattern but the full field schema is undocumented. Use `akiflow:list-slots` to inspect existing slots before attempting to create new ones.
 
 ## Tips
 
-- `date` is ISO string (`"2026-03-01"`); `dateTime` is epoch milliseconds for the specific time on that day
-- Setting `status: 2` with `date` = planned; add `dateTime` to make it appear on the calendar timeline
-- `labelId` = primary project UUID; `labelIds` = array of additional tag UUIDs
-- `originUrl` links a task to a URL (email thread, web page, Jira ticket, etc.)
+- `date` is ISO string (`"2026-03-01"`); `datetime` is epoch milliseconds for the specific time on that day
+- Setting `status: 2` with `date` = planned; add `datetime` to make it appear on the calendar timeline
+- `label_id` = primary project UUID; `tags_ids` = array of additional tag UUIDs
+- `origin_url` links a task to a URL (email thread, web page, Jira ticket, etc.)
 - Check `isWritable: true` on a calendar before creating events on it
-- The v5 API does a full sync on empty `sync_token=` — for large task lists this returns everything; filter client-side with `jq`
+- The v5 API paginates at 250 tasks/page — use `akiflow:_fetch-all-tasks` to get all pages automatically
