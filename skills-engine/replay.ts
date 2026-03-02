@@ -311,7 +311,10 @@ export async function replaySkills(
   }
 
   if (allContainerSecrets.length > 0) {
-    const crPath = path.join(projectRoot, 'src', 'container-runner.ts');
+    const crPath = path.join(
+      projectRoot,
+      resolvePathRemap('src/container-runner.ts', pathRemap),
+    );
     mergeContainerSecrets(crPath, allContainerSecrets);
   }
 

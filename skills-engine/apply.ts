@@ -259,7 +259,10 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     }
 
     if (manifest.structured?.container_secrets) {
-      const crPath = path.join(projectRoot, 'src', 'container-runner.ts');
+      const crPath = path.join(
+        projectRoot,
+        resolvePathRemap('src/container-runner.ts', pathRemap),
+      );
       mergeContainerSecrets(crPath, manifest.structured.container_secrets);
     }
 

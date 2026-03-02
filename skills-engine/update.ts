@@ -12,7 +12,11 @@ import { copyDir } from './fs-utils.js';
 import { isCustomizeActive } from './customize.js';
 import { acquireLock } from './lock.js';
 import { mergeFile } from './merge.js';
-import { recordPathRemap } from './path-remap.js';
+import {
+  loadPathRemap,
+  recordPathRemap,
+  resolvePathRemap,
+} from './path-remap.js';
 import { computeFileHash, readState, writeState } from './state.js';
 import {
   mergeContainerSecrets,
@@ -253,6 +257,7 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
     copyDir(newCorePath, baseDir);
 
     // --- Structured ops: re-apply from all skills ---
+    const pathRemap = loadPathRemap();
     const allNpmDeps: Record<string, string> = {};
     const allEnvAdditions: string[] = [];
     const allDockerServices: Record<string, unknown> = {};
@@ -302,7 +307,10 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
     }
 
     if (allContainerSecrets.length > 0) {
-      const crPath = path.join(projectRoot, 'src', 'container-runner.ts');
+      const crPath = path.join(
+        projectRoot,
+        resolvePathRemap('src/container-runner.ts', pathRemap),
+      );
       mergeContainerSecrets(crPath, allContainerSecrets);
     }
 
