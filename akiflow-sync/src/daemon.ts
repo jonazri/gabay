@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   await syncAllEntities(db, auth);
 
   startPendingWritePoller(db, auth);
-  logger.info('[daemon] pending write poller started (100ms interval)');
+  logger.info('[daemon] pending write poller started (2s interval)');
 
   const userId = await auth.getUserId();
 

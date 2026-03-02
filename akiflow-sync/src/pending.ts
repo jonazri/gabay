@@ -6,7 +6,7 @@ import { logger } from './logger.js';
 
 const V5_BASE = 'https://api.akiflow.com/v5';
 const V3_BASE = 'https://api.akiflow.com/v3';
-const POLL_INTERVAL_MS = 100;
+const POLL_INTERVAL_MS = 2000;
 const MAX_BATCH_SIZE = 100;
 const MAX_RETRIES = 5;
 
@@ -67,18 +67,26 @@ async function processBatch(
     `UPDATE pending_writes SET status = 'processing' WHERE id IN (${ids.join(',')})`
   ).run();
 
-  const isV3 = entity === 'events' || entity === 'event_modifiers';
-  const url = isV3 ? `${V3_BASE}/events` : `${V5_BASE}/${entity}`;
+  let url: string;
+  if (entity === 'events') {
+    url = `${V3_BASE}/events`;
+  } else if (entity === 'event_modifiers') {
+    url = `${V3_BASE}/events/modifiers`;
+  } else {
+    url = `${V5_BASE}/${entity}`;
+  }
+  // Use the method stored in pending_writes ('POST' for V3 events, 'PATCH' for V5 entities)
+  const method = writes[0].method;
   const payloads = writes.map(w => JSON.parse(w.payload));
 
   try {
     const resp = await auth.fetchWithAuth(url, {
-      method: 'PATCH',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payloads),
     });
 
-    if (!resp.ok) throw new Error(`${entity} PATCH failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`${entity} ${method} failed: ${resp.status}`);
 
     const body = await resp.json() as { data: ApiEntity | ApiEntity[] };
     const returned = Array.isArray(body.data) ? body.data : [body.data];

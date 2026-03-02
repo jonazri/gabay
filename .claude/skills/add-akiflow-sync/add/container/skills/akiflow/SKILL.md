@@ -69,7 +69,7 @@ akiflow:list-inbox() {
 ```bash
 akiflow:list-today() {
   local today
-  today=$(date +%Y-%m-%d)
+  today=$(date +%Y-%m-%d | sed "s/'/''/g")
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM tasks
     WHERE json_extract(data,'$.date') = '$today'
@@ -86,8 +86,8 @@ akiflow:list-upcoming() {
     echo "akiflow: days must be a number between 1 and 365" >&2; return 1
   fi
   local end_date today
-  end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d)
-  today=$(date +%Y-%m-%d)
+  end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d | sed "s/'/''/g")
+  today=$(date +%Y-%m-%d | sed "s/'/''/g")
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM tasks
     WHERE json_extract(data,'$.done') = 0
@@ -312,6 +312,8 @@ akiflow:create-event() {
   payload=$(echo "$json" | jq --arg id "$id" '. + {id: $id}')
   escaped=$(echo "$payload" | sed "s/'/''/g")
 
+  # pending_writes stores single-object payloads; the daemon wraps them into an
+  # array before sending to the API (processBatch in akiflow-sync/src/pending.ts)
   sqlite3 "$AKIFLOW_DB" "
     BEGIN;
     INSERT OR REPLACE INTO events (id, data, updated_at)

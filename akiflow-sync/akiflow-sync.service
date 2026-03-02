@@ -5,14 +5,14 @@ PartOf=nanoclaw.service
 
 [Service]
 Type=simple
-WorkingDirectory=%h/code/yonibot/gabay
-EnvironmentFile=%h/code/yonibot/gabay/.env
-ExecStartPre=/usr/bin/npm run build --prefix %h/code/yonibot/gabay/akiflow-sync
-ExecStart=/usr/bin/node %h/code/yonibot/gabay/akiflow-sync/dist/daemon.js
+WorkingDirectory=%PROJECT_ROOT%
+EnvironmentFile=%PROJECT_ROOT%/.env
+ExecStartPre=/usr/bin/npm run build --prefix %PROJECT_ROOT%/akiflow-sync
+ExecStart=/usr/bin/node %PROJECT_ROOT%/akiflow-sync/dist/daemon.js
 Restart=always
 RestartSec=5
-StandardOutput=append:%h/code/yonibot/gabay/akiflow/akiflow-sync.log
-StandardError=append:%h/code/yonibot/gabay/akiflow/akiflow-sync.log
+StandardOutput=append:%PROJECT_ROOT%/akiflow/akiflow-sync.log
+StandardError=append:%PROJECT_ROOT%/akiflow/akiflow-sync.log
 
 [Install]
 WantedBy=default.target
