@@ -1,6 +1,27 @@
+// Clamp setTimeout/setInterval to the max safe 32-bit signed integer to prevent
+// TimeoutOverflowWarning from Baileys' internal session key expiry timers (~365 days).
+const MAX_TIMER_MS = 0x7fff_ffff; // 2^31 - 1 ≈ 24.8 days
+const _origSetTimeout = globalThis.setTimeout;
+const _origSetInterval = globalThis.setInterval;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+globalThis.setTimeout = ((cb: any, ms?: number, ...args: any[]) =>
+  _origSetTimeout(
+    cb,
+    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
+    ...args,
+  )) as typeof setTimeout;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+globalThis.setInterval = ((cb: any, ms?: number, ...args: any[]) =>
+  _origSetInterval(
+    cb,
+    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
+    ...args,
+  )) as typeof setInterval;
+
 import fs from 'fs';
 import path from 'path';
 
+import './ipc-handlers/refresh-oauth.js';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
@@ -40,8 +61,15 @@ import { GroupQueue } from './group-queue.js';
 import { shutdownGoogleAssistant } from './google-assistant.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import './ipc-handlers/group-lifecycle.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken, startTokenRefreshScheduler, stopTokenRefreshScheduler } from './oauth.js';
+import {
+  AUTH_ERROR_PATTERN,
+  ensureTokenFresh,
+  refreshOAuthToken,
+  startTokenRefreshScheduler,
+  stopTokenRefreshScheduler,
+} from './oauth.js';
 import {
   initShabbatSchedule,
   isShabbatOrYomTov,
@@ -52,6 +80,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
+import './ipc-handlers/google-home.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -96,14 +125,8 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
-  setRouterState(
-    'cursor_before_pipe',
-    JSON.stringify(cursorBeforePipe),
-  );
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState('cursor_before_pipe', JSON.stringify(cursorBeforePipe));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -241,7 +264,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // Mark all user messages as thinking (container is spawning)
-  const userMessages = missedMessages.filter((m) => !m.is_from_me && !m.is_bot_message);
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
   for (const msg of userMessages) {
     statusTracker.markThinking(msg.id);
   }
@@ -296,7 +321,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
         delete cursorBeforePipe[chatJid];
         saveState();
-        logger.warn({ group: group.name }, 'Agent error after output, rolled back piped messages for retry');
+        logger.warn(
+          { group: group.name },
+          'Agent error after output, rolled back piped messages for retry',
+        );
         statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
         return false;
       }
@@ -327,7 +355,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
 function notifyMainGroup(text: string): void {
   const mainJid = Object.entries(registeredGroups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
   )?.[0];
   if (!mainJid) return;
   const channel = findChannel(channels, mainJid);
@@ -405,14 +433,20 @@ async function runAgent(
 
     if (output.status === 'error') {
       if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
-        logger.warn({ group: group.name }, 'Auth error detected, refreshing token and retrying');
-        notifyMainGroup('[system] Auth token expired — refreshing and retrying.');
+        logger.warn(
+          { group: group.name },
+          'Auth error detected, refreshing token and retrying',
+        );
+        notifyMainGroup(
+          '[system] Auth token expired — refreshing and retrying.',
+        );
         const refreshed = await refreshOAuthToken();
         if (refreshed) {
           const retry = await runContainerAgent(
             group,
             { prompt, sessionId, groupFolder: group.folder, chatJid, isMain },
-            (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+            (proc, containerName) =>
+              queue.registerProcess(chatJid, proc, containerName, group.folder),
             wrappedOnOutput,
           );
           if (retry.newSessionId) {
@@ -420,14 +454,21 @@ async function runAgent(
             setSession(group.folder, retry.newSessionId);
           }
           if (retry.status === 'error') {
-            logger.error({ group: group.name, error: retry.error }, 'Container agent error after token refresh');
-            notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+            logger.error(
+              { group: group.name, error: retry.error },
+              'Container agent error after token refresh',
+            );
+            notifyMainGroup(
+              '[system] Token refresh failed. You may need to run "claude login".',
+            );
             return 'error';
           }
           notifyMainGroup('[system] Token refreshed. Services restored.');
           return 'success';
         }
-        notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+        notifyMainGroup(
+          '[system] Token refresh failed. You may need to run "claude login".',
+        );
       }
       logger.error(
         { group: group.name, error: output.error },
@@ -533,12 +574,16 @@ async function startMessageLoop(): Promise<void> {
 
             const channel = findChannel(channels, chatJid);
             if (!channel) {
-              logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+              logger.warn(
+                { chatJid },
+                'No channel owns JID, skipping messages',
+              );
               continue;
             }
 
             const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-            const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+            const needsTrigger =
+              !isMainGroup && group.requiresTrigger !== false;
 
             // For non-main groups, only act on trigger messages.
             // Non-trigger messages accumulate in DB and get pulled as
@@ -591,7 +636,10 @@ async function startMessageLoop(): Promise<void> {
               channel
                 .setTyping?.(chatJid, true)
                 ?.catch((err) =>
-                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
                 );
             } else {
               // No active container — enqueue for a new one
@@ -756,11 +804,17 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (messageId) {
-        if (!channel.sendReaction) throw new Error('Channel does not support sendReaction');
-        const messageKey = { id: messageId, remoteJid: jid, fromMe: getMessageFromMe(messageId, jid) };
+        if (!channel.sendReaction)
+          throw new Error('Channel does not support sendReaction');
+        const messageKey = {
+          id: messageId,
+          remoteJid: jid,
+          fromMe: getMessageFromMe(messageId, jid),
+        };
         await channel.sendReaction(jid, messageKey, emoji);
       } else {
-        if (!channel.reactToLatestMessage) throw new Error('Channel does not support reactions');
+        if (!channel.reactToLatestMessage)
+          throw new Error('Channel does not support reactions');
         await channel.reactToLatestMessage(jid, emoji);
       }
     },
