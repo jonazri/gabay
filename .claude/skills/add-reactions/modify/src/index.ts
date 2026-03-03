@@ -74,6 +74,9 @@ let lastAgentTimestamp: Record<string, string> = {};
 // Tracks cursor value before messages were piped to an active container.
 // Used to roll back if the container dies after piping.
 let cursorBeforePipe: Record<string, string> = {};
+// Tracks cursor value before initial processing (container spawn).
+// Used to roll back if the process is killed mid-processing (e.g. OOM).
+let processingCursor: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
@@ -97,6 +100,13 @@ function loadState(): void {
     logger.warn('Corrupted cursor_before_pipe in DB, resetting');
     cursorBeforePipe = {};
   }
+  const procCursor = getRouterState('processing_cursor');
+  try {
+    processingCursor = procCursor ? JSON.parse(procCursor) : {};
+  } catch {
+    logger.warn('Corrupted processing_cursor in DB, resetting');
+    processingCursor = {};
+  }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
   logger.info(
@@ -109,6 +119,7 @@ function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
   setRouterState('cursor_before_pipe', JSON.stringify(cursorBeforePipe));
+  setRouterState('processing_cursor', JSON.stringify(processingCursor));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -198,6 +209,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
+  processingCursor[chatJid] = previousCursor;
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
@@ -285,6 +297,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (cursorBeforePipe[chatJid]) {
         lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
         delete cursorBeforePipe[chatJid];
+        delete processingCursor[chatJid];
         saveState();
         logger.warn(
           { group: group.name },
@@ -297,12 +310,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, no piped messages to recover',
       );
+      delete processingCursor[chatJid];
       statusTracker.markAllDone(chatJid);
       return true;
     }
     // No output sent — roll back everything so the full batch is retried
     lastAgentTimestamp[chatJid] = previousCursor;
     delete cursorBeforePipe[chatJid];
+    delete processingCursor[chatJid];
     saveState();
     logger.warn(
       { group: group.name },
@@ -314,6 +329,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Success — clear pipe tracking (markAllDone already fired in streaming callback)
   delete cursorBeforePipe[chatJid];
+  delete processingCursor[chatJid];
   saveState();
   return true;
 }
@@ -519,11 +535,31 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
+  // Roll back any processing cursors that were persisted before a crash.
+  // This ensures messages being processed when the process was killed (e.g. OOM)
+  // are re-fetched on restart.
+  let rolledBack = false;
+  for (const [chatJid, savedCursor] of Object.entries(processingCursor)) {
+    if (queue.isActive(chatJid)) {
+      logger.debug(
+        { chatJid },
+        'Recovery: skipping processing cursor rollback, container still active',
+      );
+      continue;
+    }
+    logger.info(
+      { chatJid, rolledBackTo: savedCursor },
+      'Recovery: rolling back processing cursor',
+    );
+    lastAgentTimestamp[chatJid] = savedCursor;
+    delete processingCursor[chatJid];
+    rolledBack = true;
+  }
+
   // Roll back any piped-message cursors that were persisted before a crash.
   // This ensures messages piped to a now-dead container are re-fetched.
   // IMPORTANT: Only roll back if the container is no longer running — rolling
   // back while the container is alive causes duplicate processing.
-  let rolledBack = false;
   for (const [chatJid, savedCursor] of Object.entries(cursorBeforePipe)) {
     if (queue.isActive(chatJid)) {
       logger.debug(
