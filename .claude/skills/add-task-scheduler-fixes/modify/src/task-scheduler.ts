@@ -54,19 +54,6 @@ export interface SchedulerDependencies {
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
-async function notifyMain(
-  deps: SchedulerDependencies,
-  text: string,
-): Promise<void> {
-  const groups = deps.registeredGroups();
-  const mainJid = Object.entries(groups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
-  )?.[0];
-  if (mainJid) {
-    await deps.sendMessage(mainJid, text);
-  }
-}
-
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
