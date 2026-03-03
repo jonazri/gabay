@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import './ipc-handlers/refresh-oauth.js';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
@@ -38,7 +39,13 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken, startTokenRefreshScheduler, stopTokenRefreshScheduler } from './oauth.js';
+import {
+  AUTH_ERROR_PATTERN,
+  ensureTokenFresh,
+  refreshOAuthToken,
+  startTokenRefreshScheduler,
+  stopTokenRefreshScheduler,
+} from './oauth.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -247,7 +254,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
 function notifyMainGroup(text: string): void {
   const mainJid = Object.entries(registeredGroups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
   )?.[0];
   if (!mainJid) return;
   const channel = findChannel(channels, mainJid);
@@ -325,14 +332,20 @@ async function runAgent(
 
     if (output.status === 'error') {
       if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
-        logger.warn({ group: group.name }, 'Auth error detected, refreshing token and retrying');
-        notifyMainGroup('[system] Auth token expired — refreshing and retrying.');
+        logger.warn(
+          { group: group.name },
+          'Auth error detected, refreshing token and retrying',
+        );
+        notifyMainGroup(
+          '[system] Auth token expired — refreshing and retrying.',
+        );
         const refreshed = await refreshOAuthToken();
         if (refreshed) {
           const retry = await runContainerAgent(
             group,
             { prompt, sessionId, groupFolder: group.folder, chatJid, isMain },
-            (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+            (proc, containerName) =>
+              queue.registerProcess(chatJid, proc, containerName, group.folder),
             wrappedOnOutput,
           );
           if (retry.newSessionId) {
@@ -340,14 +353,21 @@ async function runAgent(
             setSession(group.folder, retry.newSessionId);
           }
           if (retry.status === 'error') {
-            logger.error({ group: group.name, error: retry.error }, 'Container agent error after token refresh');
-            notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+            logger.error(
+              { group: group.name, error: retry.error },
+              'Container agent error after token refresh',
+            );
+            notifyMainGroup(
+              '[system] Token refresh failed. You may need to run "claude login".',
+            );
             return 'error';
           }
           notifyMainGroup('[system] Token refreshed. Services restored.');
           return 'success';
         }
-        notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+        notifyMainGroup(
+          '[system] Token refresh failed. You may need to run "claude login".',
+        );
       }
       logger.error(
         { group: group.name, error: output.error },

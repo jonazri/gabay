@@ -4,18 +4,18 @@ description: "Smart home control via Google Assistant with IPC bridge"
 core_version: 0.1.0
 adds:
   - src/google-assistant.ts
+  - src/ipc-handlers/google-home.ts
   - scripts/google-assistant-daemon.py
   - scripts/google-assistant-setup.py
   - container/skills/google-home/SKILL.md
   - container/skills/google-home/google-home
   - container/.dockerignore
 modifies:
-  - src/ipc.ts
   - src/index.ts
   - src/container-runner.ts
   - container/Dockerfile
 conflicts: []
 incompatible_with: []
-depends: []
+depends: [ipc-handler-registry]
 tested_with: []
 test: "npx tsc --noEmit"

@@ -2,14 +2,12 @@ skill: group-lifecycle
 version: 1.0.0
 description: "Group unregistration via IPC for dynamic group management"
 core_version: 0.1.0
-adds: []
+adds:
+  - src/ipc-handlers/group-lifecycle.ts
 modifies:
   - src/db.ts
-  - src/ipc.ts
   - src/index.ts
-modify_base:
-  src/ipc.ts: refresh-oauth
 conflicts: []
 depends:
-  - refresh-oauth
+  - ipc-handler-registry
 test: "npx tsc --noEmit"
