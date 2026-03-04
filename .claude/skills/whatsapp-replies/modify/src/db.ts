@@ -403,6 +403,18 @@ export function storeReaction(reaction: Reaction): void {
   );
 }
 
+/** Test-only helper — query reactions for a message. Not used in production. */
+export function _getReactionsForMessage(
+  messageId: string,
+  chatJid: string,
+): Reaction[] {
+  return db
+    .prepare(
+      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`,
+    )
+    .all(messageId, chatJid) as Reaction[];
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {

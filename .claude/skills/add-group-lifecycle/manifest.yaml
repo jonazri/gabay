@@ -10,4 +10,5 @@ modifies:
 conflicts: []
 depends:
   - ipc-handler-registry
+  - reactions
 test: "npx tsc --noEmit"

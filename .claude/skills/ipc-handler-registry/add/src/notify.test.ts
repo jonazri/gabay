@@ -32,7 +32,7 @@ describe('notifyMainGroup', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it('falls back to MAIN_GROUP_FOLDER when isMain is not set', async () => {
+  it('uses explicit mainGroupFolder override when provided', async () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const registeredGroups = {
       'main-jid@g.us': { name: 'Main', folder: 'main' },

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
+  _getReactionsForMessage,
   _initTestDatabase,
   createTask,
   deleteTask,
@@ -480,20 +481,23 @@ describe('getMessageFromMe', () => {
 // --- storeReaction ---
 
 describe('storeReaction', () => {
-  it('stores a reaction without throwing', () => {
-    expect(() =>
-      storeReaction({
-        message_id: 'msg-1',
-        message_chat_jid: 'group@g.us',
-        reactor_jid: 'user@s.whatsapp.net',
-        reactor_name: 'Alice',
-        emoji: '👍',
-        timestamp: '2024-01-01T00:00:01.000Z',
-      }),
-    ).not.toThrow();
+  it('stores and retrieves a reaction', () => {
+    storeReaction({
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      reactor_name: 'Alice',
+      emoji: '👍',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const reactions = _getReactionsForMessage('msg-1', 'group@g.us');
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].emoji).toBe('👍');
+    expect(reactions[0].reactor_name).toBe('Alice');
   });
 
-  it('upserts on same reactor + message without throwing', () => {
+  it('upserts on same reactor + message', () => {
     const base = {
       message_id: 'msg-1',
       message_chat_jid: 'group@g.us',
@@ -502,13 +506,15 @@ describe('storeReaction', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     };
     storeReaction({ ...base, emoji: '👍' });
-    expect(() =>
-      storeReaction({
-        ...base,
-        emoji: '❤️',
-        timestamp: '2024-01-01T00:00:02.000Z',
-      }),
-    ).not.toThrow();
+    storeReaction({
+      ...base,
+      emoji: '❤️',
+      timestamp: '2024-01-01T00:00:02.000Z',
+    });
+
+    const reactions = _getReactionsForMessage('msg-1', 'group@g.us');
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].emoji).toBe('❤️');
   });
 
   it('removes reaction when emoji is empty', () => {
@@ -519,15 +525,15 @@ describe('storeReaction', () => {
       emoji: '👍',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
-    expect(() =>
-      storeReaction({
-        message_id: 'msg-1',
-        message_chat_jid: 'group@g.us',
-        reactor_jid: 'user@s.whatsapp.net',
-        emoji: '',
-        timestamp: '2024-01-01T00:00:02.000Z',
-      }),
-    ).not.toThrow();
+    storeReaction({
+      message_id: 'msg-1',
+      message_chat_jid: 'group@g.us',
+      reactor_jid: 'user@s.whatsapp.net',
+      emoji: '',
+      timestamp: '2024-01-01T00:00:02.000Z',
+    });
+
+    expect(_getReactionsForMessage('msg-1', 'group@g.us')).toHaveLength(0);
   });
 });
 
