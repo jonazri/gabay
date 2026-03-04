@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Mock registry (registerChannel runs at import time)
+vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
+
 import { GmailChannel, GmailChannelOpts } from './gmail.js';
 
 function makeOpts(overrides?: Partial<GmailChannelOpts>): GmailChannelOpts {
@@ -59,7 +62,9 @@ describe('GmailChannel', () => {
 
     it('defaults to unread query when no filter configured', () => {
       const ch = new GmailChannel(makeOpts());
-      const query = (ch as unknown as { buildQuery: () => string }).buildQuery();
+      const query = (
+        ch as unknown as { buildQuery: () => string }
+      ).buildQuery();
       expect(query).toBe('is:unread category:primary');
     });
 

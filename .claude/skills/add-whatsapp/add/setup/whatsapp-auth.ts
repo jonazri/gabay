@@ -1,6 +1,5 @@
 /**
- * Step: whatsapp-auth — Full WhatsApp auth flow with polling.
- * Replaces 04-auth-whatsapp.sh
+ * Step: whatsapp-auth — WhatsApp interactive auth (QR code / pairing code).
  */
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
@@ -66,8 +65,14 @@ function parseArgs(args: string[]): { method: string; phone: string } {
   let method = '';
   let phone = '';
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--method' && args[i + 1]) { method = args[i + 1]; i++; }
-    if (args[i] === '--phone' && args[i + 1]) { phone = args[i + 1]; i++; }
+    if (args[i] === '--method' && args[i + 1]) {
+      method = args[i + 1];
+      i++;
+    }
+    if (args[i] === '--phone' && args[i + 1]) {
+      phone = args[i + 1];
+      i++;
+    }
   }
   return { method, phone };
 }
@@ -87,7 +92,10 @@ function readFileSafe(filePath: string): string {
 function getPhoneNumber(projectRoot: string): string {
   try {
     const creds = JSON.parse(
-      fs.readFileSync(path.join(projectRoot, 'store', 'auth', 'creds.json'), 'utf-8'),
+      fs.readFileSync(
+        path.join(projectRoot, 'store', 'auth', 'creds.json'),
+        'utf-8',
+      ),
     );
     if (creds.me?.id) {
       return creds.me.id.split(':')[0].split('@')[0];
@@ -116,23 +124,30 @@ function emitAuthStatus(
 
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
+
   const { method, phone } = parseArgs(args);
   const statusFile = path.join(projectRoot, 'store', 'auth-status.txt');
   const qrFile = path.join(projectRoot, 'store', 'qr-data.txt');
 
   if (!method) {
-    emitAuthStatus('unknown', 'failed', 'failed', { ERROR: 'missing_method_flag' });
+    emitAuthStatus('unknown', 'failed', 'failed', {
+      ERROR: 'missing_method_flag',
+    });
     process.exit(4);
   }
 
   // qr-terminal is a manual flow
   if (method === 'qr-terminal') {
-    emitAuthStatus('qr-terminal', 'manual', 'manual', { PROJECT_PATH: projectRoot });
+    emitAuthStatus('qr-terminal', 'manual', 'manual', {
+      PROJECT_PATH: projectRoot,
+    });
     return;
   }
 
   if (method === 'pairing-code' && !phone) {
-    emitAuthStatus('pairing-code', 'failed', 'failed', { ERROR: 'missing_phone_number' });
+    emitAuthStatus('pairing-code', 'failed', 'failed', {
+      ERROR: 'missing_phone_number',
+    });
     process.exit(4);
   }
 
@@ -142,15 +157,31 @@ export async function run(args: string[]): Promise<void> {
   }
 
   // Clean stale state
-  logger.info({ method }, 'Starting WhatsApp auth');
-  try { fs.rmSync(path.join(projectRoot, 'store', 'auth'), { recursive: true, force: true }); } catch { /* ok */ }
-  try { fs.unlinkSync(qrFile); } catch { /* ok */ }
-  try { fs.unlinkSync(statusFile); } catch { /* ok */ }
+  logger.info({ method }, 'Starting channel authentication');
+  try {
+    fs.rmSync(path.join(projectRoot, 'store', 'auth'), {
+      recursive: true,
+      force: true,
+    });
+  } catch {
+    /* ok */
+  }
+  try {
+    fs.unlinkSync(qrFile);
+  } catch {
+    /* ok */
+  }
+  try {
+    fs.unlinkSync(statusFile);
+  } catch {
+    /* ok */
+  }
 
   // Start auth process in background
-  const authArgs = method === 'pairing-code'
-    ? ['src/whatsapp-auth.ts', '--pairing-code', '--phone', phone]
-    : ['src/whatsapp-auth.ts'];
+  const authArgs =
+    method === 'pairing-code'
+      ? ['src/whatsapp-auth.ts', '--pairing-code', '--phone', phone]
+      : ['src/whatsapp-auth.ts'];
 
   const authProc = spawn('npx', ['tsx', ...authArgs], {
     cwd: projectRoot,
@@ -165,7 +196,11 @@ export async function run(args: string[]): Promise<void> {
 
   // Cleanup on exit
   const cleanup = () => {
-    try { authProc.kill(); } catch { /* ok */ }
+    try {
+      authProc.kill();
+    } catch {
+      /* ok */
+    }
   };
   process.on('exit', cleanup);
 
@@ -221,10 +256,14 @@ async function handleQrBrowser(
     if (!isHeadless()) {
       const opened = openBrowser(htmlPath);
       if (!opened) {
-        logger.warn('Could not open browser — display QR in terminal as fallback');
+        logger.warn(
+          'Could not open browser — display QR in terminal as fallback',
+        );
       }
     } else {
-      logger.info('Headless environment — QR HTML saved but browser not opened');
+      logger.info(
+        'Headless environment — QR HTML saved but browser not opened',
+      );
     }
   } catch (err) {
     logger.error({ err }, 'Failed to generate QR HTML');
@@ -261,15 +300,24 @@ async function handlePairingCode(
   }
 
   if (!pairingCode) {
-    emitAuthStatus('pairing-code', 'failed', 'failed', { ERROR: 'pairing_code_timeout' });
+    emitAuthStatus('pairing-code', 'failed', 'failed', {
+      ERROR: 'pairing_code_timeout',
+    });
     process.exit(3);
   }
 
   // Emit pairing code immediately so the caller can display it to the user
-  emitAuthStatus('pairing-code', 'pairing_code_ready', 'waiting', { PAIRING_CODE: pairingCode });
+  emitAuthStatus('pairing-code', 'pairing_code_ready', 'waiting', {
+    PAIRING_CODE: pairingCode,
+  });
 
   // Poll for completion (120s)
-  await pollAuthCompletion('pairing-code', statusFile, projectRoot, pairingCode);
+  await pollAuthCompletion(
+    'pairing-code',
+    statusFile,
+    projectRoot,
+    pairingCode,
+  );
 }
 
 async function pollAuthCompletion(
