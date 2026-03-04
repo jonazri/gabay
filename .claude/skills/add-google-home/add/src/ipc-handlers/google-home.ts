@@ -49,10 +49,12 @@ const handler: IpcHandler = async (data, _deps, context) => {
           ? await googleAssistantHealth()
           : await sendGoogleAssistantCommand(text);
 
+    // When Google Assistant returns no text (common for compound commands
+    // like "set lights to daylight and 20%"), the command may still have
+    // executed successfully. Don't escalate to error — return ok with
+    // a synthetic confirmation.
     if (result.warning === 'no_response_text') {
-      result.status = 'error';
-      result.error =
-        'Google Assistant returned no response text. Try splitting compound commands.';
+      result.text = 'Command sent (no verbal confirmation from Assistant).';
     }
 
     writeIpcResponse(requestId, result);
