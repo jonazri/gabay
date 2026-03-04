@@ -9,8 +9,11 @@ registerIpcHandler('unregister_group', (data, deps, context) => {
     );
     return;
   }
-  if (!data.jid) {
-    logger.warn({ data }, 'Invalid unregister_group request - missing jid');
+  if (typeof data.jid !== 'string' || !data.jid) {
+    logger.warn(
+      { data },
+      'Invalid unregister_group request - jid must be a string',
+    );
     return;
   }
   if (!deps.unregisterGroup) {
