@@ -7,11 +7,12 @@ adds:
   - scripts/oauth/refresh.sh
   - scripts/oauth/README.md
   - src/oauth.ts
+  - src/ipc-handlers/refresh-oauth.ts
 modifies:
-  - src/ipc.ts
   - src/index.ts
 conflicts: []
 incompatible_with: []
-depends: []
+depends:
+  - ipc-handler-registry
 tested_with: []
 test: "npx tsc --noEmit"

@@ -1,5 +1,7 @@
 import { ChildProcess, spawn } from 'child_process';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as https from 'https';
 import * as path from 'path';
 import * as readline from 'readline';
 
@@ -13,8 +15,204 @@ export interface GoogleAssistantResponse {
   raw_html?: string;
 }
 
-const VENV_PYTHON = path.join(process.cwd(), 'scripts', 'venv', 'bin', 'python3');
-const PYTHON_DAEMON = path.join(process.cwd(), 'scripts', 'google-assistant-daemon.py');
+const VENV_PYTHON = path.join(
+  process.cwd(),
+  'scripts',
+  'venv',
+  'bin',
+  'python3',
+);
+const PYTHON_DAEMON = path.join(
+  process.cwd(),
+  'scripts',
+  'google-assistant-daemon.py',
+);
+const GOOGLE_CREDENTIALS_PATH = path.join(
+  process.cwd(),
+  'data',
+  'google-assistant',
+  'credentials.json',
+);
+
+const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes on failure
+const MAX_DELAY_MS = 23 * 60 * 60 * 1000; // 23 hours
+
+// ── Google OAuth token management ─────────────────────────────────
+
+interface GoogleCredentials {
+  token?: string;
+  refresh_token?: string;
+  token_uri?: string;
+  client_id?: string;
+  client_secret?: string;
+  scopes?: string[];
+  expires_at?: number; // epoch ms
+}
+
+function readGoogleCredentials(): GoogleCredentials | null {
+  try {
+    return JSON.parse(fs.readFileSync(GOOGLE_CREDENTIALS_PATH, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeGoogleCredentials(creds: GoogleCredentials): void {
+  const dir = path.dirname(GOOGLE_CREDENTIALS_PATH);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${GOOGLE_CREDENTIALS_PATH}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(creds, null, 2));
+  fs.renameSync(tmp, GOOGLE_CREDENTIALS_PATH);
+}
+
+export function refreshGoogleToken(): Promise<boolean> {
+  const creds = readGoogleCredentials();
+  if (!creds?.client_id || !creds?.client_secret || !creds?.refresh_token) {
+    logger.debug('Google credentials missing fields, cannot refresh');
+    return Promise.resolve(false);
+  }
+
+  const postData = new URLSearchParams({
+    client_id: creds.client_id,
+    client_secret: creds.client_secret,
+    refresh_token: creds.refresh_token,
+    grant_type: 'refresh_token',
+  }).toString();
+
+  return new Promise((resolve) => {
+    const req = https.request(
+      'https://oauth2.googleapis.com/token',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            logger.error(
+              { statusCode: res.statusCode, body },
+              'Google token refresh failed',
+            );
+            resolve(false);
+            return;
+          }
+          try {
+            const data = JSON.parse(body);
+            const expiresAt = Date.now() + (data.expires_in ?? 3600) * 1000;
+            writeGoogleCredentials({
+              ...creds,
+              token: data.access_token,
+              expires_at: expiresAt,
+            });
+            logger.info(
+              { expiresAt: new Date(expiresAt).toISOString() },
+              'Google token refreshed',
+            );
+            resolve(true);
+          } catch (err) {
+            logger.error({ err }, 'Failed to parse Google token response');
+            resolve(false);
+          }
+        });
+      },
+    );
+    req.on('error', (err) => {
+      logger.error({ err }, 'Google token refresh request failed');
+      resolve(false);
+    });
+    req.write(postData);
+    req.end();
+  });
+}
+
+export async function ensureGoogleTokenFresh(): Promise<boolean> {
+  const creds = readGoogleCredentials();
+  if (!creds?.expires_at) return true; // No expiry info — let daemon handle it
+  if (!creds.refresh_token) return true; // Can't refresh without refresh_token
+
+  const remaining = creds.expires_at - Date.now();
+  if (remaining > REFRESH_BUFFER_MS) return true; // Still fresh
+
+  logger.warn(
+    {
+      remainingMs: remaining,
+      expiresAt: new Date(creds.expires_at).toISOString(),
+    },
+    'Google token expired or expiring soon, refreshing',
+  );
+  return refreshGoogleToken();
+}
+
+let googleRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function stopGoogleTokenScheduler(): void {
+  if (googleRefreshTimer) {
+    clearTimeout(googleRefreshTimer);
+    googleRefreshTimer = null;
+  }
+}
+
+export function startGoogleTokenScheduler(
+  onAlert?: (msg: string) => void,
+): void {
+  // Only schedule if credentials file exists with refresh_token
+  const creds = readGoogleCredentials();
+  if (!creds?.refresh_token) {
+    logger.debug('No Google refresh_token, skipping token scheduler');
+    return;
+  }
+
+  let hadFailure = false;
+
+  const schedule = () => {
+    if (googleRefreshTimer) clearTimeout(googleRefreshTimer);
+
+    const currentCreds = readGoogleCredentials();
+    if (!currentCreds?.expires_at) {
+      logger.debug('No expires_at in Google credentials, skipping schedule');
+      return;
+    }
+
+    const remaining = currentCreds.expires_at - Date.now();
+    let delayMs: number;
+
+    if (remaining > REFRESH_BUFFER_MS) {
+      delayMs = Math.min(remaining - REFRESH_BUFFER_MS, MAX_DELAY_MS);
+    } else {
+      delayMs = RETRY_DELAY_MS;
+    }
+
+    logger.info(
+      { delayMs, expiresAt: new Date(currentCreds.expires_at).toISOString() },
+      'Scheduled Google token refresh',
+    );
+
+    googleRefreshTimer = setTimeout(async () => {
+      const ok = await refreshGoogleToken();
+      if (ok) {
+        if (hadFailure) {
+          hadFailure = false;
+          onAlert?.('Google token refreshed. Services restored.');
+        }
+        schedule();
+      } else {
+        hadFailure = true;
+        onAlert?.('Google token refresh failed — retrying in 5 min.');
+        googleRefreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
+      }
+    }, delayMs);
+  };
+
+  schedule();
+}
 
 // ── Python daemon management ──────────────────────────────────────
 
@@ -108,7 +306,10 @@ async function ensureDaemon(): Promise<void> {
           pending.resolve(parsed);
         }
       } else if (pendingCommands.size > 0) {
-        logger.warn({ cmdId, pending: pendingCommands.size }, 'Unroutable response from daemon (no matching id)');
+        logger.warn(
+          { cmdId, pending: pendingCommands.size },
+          'Unroutable response from daemon (no matching id)',
+        );
       }
     });
 
@@ -132,7 +333,10 @@ async function ensureDaemon(): Promise<void> {
 async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
   // Auto-restart daemon after consecutive failures
   if (consecutiveFailures >= 3 && daemon && !daemon.killed) {
-    logger.warn({ consecutiveFailures }, 'Too many consecutive failures, restarting daemon');
+    logger.warn(
+      { consecutiveFailures },
+      'Too many consecutive failures, restarting daemon',
+    );
     daemon.kill();
     daemon = null;
     daemonRL = null;
@@ -140,6 +344,7 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
     consecutiveFailures = 0;
   }
 
+  await ensureGoogleTokenFresh();
   await ensureDaemon();
 
   if (!daemon || !daemon.stdin) {
@@ -167,7 +372,9 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
 /**
  * Send a text command to Google Assistant and return the response.
  */
-export async function sendGoogleAssistantCommand(text: string): Promise<GoogleAssistantResponse> {
+export async function sendGoogleAssistantCommand(
+  text: string,
+): Promise<GoogleAssistantResponse> {
   let result: any;
   try {
     result = await sendCommand({ cmd: 'command', text });

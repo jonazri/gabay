@@ -28,7 +28,7 @@ import {
 } from '../db.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { identifySpeaker } from '../voice-recognition.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
@@ -36,6 +36,7 @@ import {
   QuotedMessageKey,
   RegisteredGroup,
 } from '../types.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 
 /**
  * Extract text content from a Baileys quoted message proto.
@@ -82,7 +83,6 @@ export class WhatsAppChannel implements Channel {
   }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
-  private reconnectAttempt = 0;
 
   private opts: WhatsAppChannelOpts;
 
@@ -149,27 +149,21 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          const delay = Math.min(
-            1000 * Math.pow(2, this.reconnectAttempt),
-            60000,
-          );
-          this.reconnectAttempt++;
-          logger.info(
-            { delay, attempt: this.reconnectAttempt },
-            'Reconnecting...',
-          );
-          setTimeout(() => {
-            this.connectInternal().catch((err) => {
-              logger.error({ err }, 'Reconnect failed');
-            });
-          }, delay);
+          logger.info('Reconnecting...');
+          this.connectInternal().catch((err) => {
+            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
+            setTimeout(() => {
+              this.connectInternal().catch((err2) => {
+                logger.error({ err: err2 }, 'Reconnection retry failed');
+              });
+            }, 5000);
+          });
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
-        this.reconnectAttempt = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -218,166 +212,174 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
-        if (!msg.message) continue;
-        // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
-        // editedMessage, etc.) so that conversation, extendedTextMessage,
-        // imageMessage, etc. are accessible at the top level.
-        const normalized = normalizeMessageContent(msg.message);
-        if (!normalized) continue;
-        const rawJid = msg.key.remoteJid;
-        if (!rawJid || rawJid === 'status@broadcast') continue;
+        try {
+          if (!msg.message) continue;
+          // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
+          // editedMessage, etc.) so that conversation, extendedTextMessage,
+          // imageMessage, etc. are accessible at the top level.
+          const normalized = normalizeMessageContent(msg.message);
+          if (!normalized) continue;
+          const rawJid = msg.key.remoteJid;
+          if (!rawJid || rawJid === 'status@broadcast') continue;
 
-        // Translate LID JID to phone JID if applicable
-        const chatJid = await this.translateJid(rawJid);
+          // Translate LID JID to phone JID if applicable
+          const chatJid = await this.translateJid(rawJid);
 
-        const timestamp = new Date(
-          Number(msg.messageTimestamp) * 1000,
-        ).toISOString();
+          const timestamp = new Date(
+            Number(msg.messageTimestamp) * 1000,
+          ).toISOString();
 
-        // Always notify about chat metadata for group discovery
-        const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(
-          chatJid,
-          timestamp,
-          undefined,
-          'whatsapp',
-          isGroup,
-        );
-
-        // Only deliver full message for registered groups
-        const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
-          const content =
-            normalized.conversation ||
-            normalized.extendedTextMessage?.text ||
-            normalized.imageMessage?.caption ||
-            normalized.videoMessage?.caption ||
-            '';
-
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          // but allow voice messages through for transcription
-          if (!content && !isVoiceMessage(msg)) continue;
-
-          const sender = msg.key.participant || msg.key.remoteJid || '';
-          const senderName = msg.pushName || sender.split('@')[0];
-
-          const fromMe = msg.key.fromMe || false;
-          // Detect bot messages: with own number, fromMe is reliable
-          // since only the bot sends from that number.
-          // With shared number, bot messages carry the assistant name prefix
-          // (even in DMs/self-chat) so we check for that.
-          const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
-            ? fromMe
-            : content.startsWith(`${ASSISTANT_NAME}:`);
-
-          // Extract reply/quote context if present
-          const contextInfo =
-            msg.message?.extendedTextMessage?.contextInfo ||
-            msg.message?.imageMessage?.contextInfo ||
-            msg.message?.videoMessage?.contextInfo ||
-            null;
-          const repliedToId = contextInfo?.stanzaId || undefined;
-          const repliedToSender = contextInfo?.participant || undefined;
-          const repliedToContent = extractQuotedText(
-            contextInfo?.quotedMessage as
-              | Record<string, unknown>
-              | null
-              | undefined,
+          // Always notify about chat metadata for group discovery
+          const isGroup = chatJid.endsWith('@g.us');
+          this.opts.onChatMetadata(
+            chatJid,
+            timestamp,
+            undefined,
+            'whatsapp',
+            isGroup,
           );
 
-          // Transcribe voice messages and identify speaker
-          let finalContent = content;
-          if (isVoiceMessage(msg)) {
-            try {
-              const { transcript, audioBuffer } = await transcribeAudioMessage(
-                msg,
-                this.sock,
-              );
+          // Only deliver full message for registered groups
+          const groups = this.opts.registeredGroups();
+          if (groups[chatJid]) {
+            const content =
+              normalized.conversation ||
+              normalized.extendedTextMessage?.text ||
+              normalized.imageMessage?.caption ||
+              normalized.videoMessage?.caption ||
+              '';
 
-              // Save raw audio for enrollment/debugging
-              if (audioBuffer) {
-                try {
-                  await fsPromises.mkdir(VOICE_AUDIO_DIR, { recursive: true });
-                  const audioPath = path.join(
-                    VOICE_AUDIO_DIR,
-                    `${Date.now()}.ogg`,
-                  );
-                  await fsPromises.writeFile(audioPath, audioBuffer);
-                  logger.debug({ audioPath }, 'Saved voice audio');
-                } catch (saveErr) {
-                  logger.warn({ err: saveErr }, 'Failed to save voice audio');
-                }
-              }
+            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+            // but allow voice messages through for transcription
+            if (!content && !isVoiceMessage(msg)) continue;
 
-              // Identify speaker
-              let speakerTag = '';
-              if (audioBuffer) {
-                try {
-                  const result = await identifySpeaker(audioBuffer);
-                  if (result.speaker) {
-                    const pct = Math.round(result.similarity * 100);
-                    speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+            const sender = msg.key.participant || msg.key.remoteJid || '';
+            const senderName = msg.pushName || sender.split('@')[0];
 
-                    // Continuous learning: update profile with high-confidence samples
-                    if (
-                      OWNER_NAME &&
-                      result.speaker === OWNER_NAME &&
-                      result.similarity >= 0.65
-                    ) {
-                      try {
-                        const { extractVoiceEmbedding, updateVoiceProfile } =
-                          await import('../voice-recognition.js');
-                        const embedding = await extractVoiceEmbedding(
-                          audioBuffer!,
-                        );
-                        await updateVoiceProfile(OWNER_NAME, [embedding]);
-                        logger.info(
-                          { similarity: result.similarity },
-                          'Auto-updated voice profile with new sample',
-                        );
-                      } catch (learnErr) {
-                        logger.warn(
-                          { err: learnErr },
-                          'Failed to auto-update voice profile',
-                        );
-                      }
-                    }
-                  } else {
-                    speakerTag = ' [Unknown speaker]';
+            const fromMe = msg.key.fromMe || false;
+            // Detect bot messages: with own number, fromMe is reliable
+            // since only the bot sends from that number.
+            // With shared number, bot messages carry the assistant name prefix
+            // (even in DMs/self-chat) so we check for that.
+            const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
+              ? fromMe
+              : content.startsWith(`${ASSISTANT_NAME}:`);
+
+            // Extract reply/quote context if present
+            const contextInfo =
+              msg.message?.extendedTextMessage?.contextInfo ||
+              msg.message?.imageMessage?.contextInfo ||
+              msg.message?.videoMessage?.contextInfo ||
+              null;
+            const repliedToId = contextInfo?.stanzaId || undefined;
+            const repliedToSender = contextInfo?.participant || undefined;
+            const repliedToContent = extractQuotedText(
+              contextInfo?.quotedMessage as
+                | Record<string, unknown>
+                | null
+                | undefined,
+            );
+
+            // Transcribe voice messages and identify speaker
+            let finalContent = content;
+            if (isVoiceMessage(msg)) {
+              try {
+                const { transcript, audioBuffer } =
+                  await transcribeAudioMessage(msg, this.sock);
+
+                // Save raw audio for enrollment/debugging (opt-in via VOICE_SAVE_AUDIO=true)
+                if (process.env.VOICE_SAVE_AUDIO === 'true' && audioBuffer) {
+                  try {
+                    await fsPromises.mkdir(VOICE_AUDIO_DIR, {
+                      recursive: true,
+                    });
+                    const suffix = Math.random().toString(36).slice(2, 8);
+                    const audioPath = path.join(
+                      VOICE_AUDIO_DIR,
+                      `${Date.now()}-${suffix}.ogg`,
+                    );
+                    await fsPromises.writeFile(audioPath, audioBuffer);
+                    logger.debug({ audioPath }, 'Saved voice audio');
+                  } catch (saveErr) {
+                    logger.warn({ err: saveErr }, 'Failed to save voice audio');
                   }
-                } catch (idErr) {
-                  logger.warn({ err: idErr }, 'Speaker identification failed');
                 }
-              }
 
-              if (transcript) {
-                finalContent = `[Voice: ${transcript}]${speakerTag}`;
-                logger.info(
-                  { chatJid, length: transcript.length, speakerTag },
-                  'Transcribed voice message',
-                );
-              } else {
-                finalContent = '[Voice Message - transcription unavailable]';
+                // Identify speaker
+                let speakerTag = '';
+                if (audioBuffer) {
+                  try {
+                    const result = await identifySpeaker(audioBuffer);
+                    if (result.speaker) {
+                      const pct = Math.round(result.similarity * 100);
+                      speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+
+                      // Continuous learning: update profile with high-confidence samples
+                      if (
+                        OWNER_NAME &&
+                        result.speaker === OWNER_NAME &&
+                        result.similarity >= 0.65
+                      ) {
+                        try {
+                          await updateVoiceProfile(OWNER_NAME, [
+                            result.embedding,
+                          ]);
+                          logger.info(
+                            { similarity: result.similarity },
+                            'Auto-updated voice profile with new sample',
+                          );
+                        } catch (learnErr) {
+                          logger.warn(
+                            { err: learnErr },
+                            'Failed to auto-update voice profile',
+                          );
+                        }
+                      }
+                    } else {
+                      speakerTag = ' [Unknown speaker]';
+                    }
+                  } catch (idErr) {
+                    logger.warn(
+                      { err: idErr },
+                      'Speaker identification failed',
+                    );
+                  }
+                }
+
+                if (transcript) {
+                  finalContent = `[Voice: ${transcript}]${speakerTag}`;
+                  logger.info(
+                    { chatJid, length: transcript.length, speakerTag },
+                    'Transcribed voice message',
+                  );
+                } else {
+                  finalContent = '[Voice Message - transcription unavailable]';
+                }
+              } catch (err) {
+                logger.error({ err }, 'Voice transcription error');
+                finalContent = '[Voice Message - transcription failed]';
               }
-            } catch (err) {
-              logger.error({ err }, 'Voice transcription error');
-              finalContent = '[Voice Message - transcription failed]';
             }
-          }
 
-          this.opts.onMessage(chatJid, {
-            id: msg.key.id || '',
-            chat_jid: chatJid,
-            sender,
-            sender_name: senderName,
-            content: finalContent,
-            timestamp,
-            is_from_me: fromMe,
-            is_bot_message: isBotMessage,
-            replied_to_id: repliedToId,
-            replied_to_sender: repliedToSender,
-            replied_to_content: repliedToContent,
-          });
+            this.opts.onMessage(chatJid, {
+              id: msg.key.id || '',
+              chat_jid: chatJid,
+              sender,
+              sender_name: senderName,
+              content: finalContent,
+              timestamp,
+              is_from_me: fromMe,
+              is_bot_message: isBotMessage,
+              replied_to_id: repliedToId,
+              replied_to_sender: repliedToSender,
+              replied_to_content: repliedToContent,
+            });
+          }
+        } catch (err) {
+          logger.error(
+            { err, remoteJid: msg.key?.remoteJid },
+            'Error processing incoming message',
+          );
         }
       }
     });
@@ -451,7 +453,12 @@ export class WhatsAppChannel implements Channel {
           { text: prefixed },
           {
             quoted: {
-              key: quotedKey,
+              key: {
+                id: quotedKey.id,
+                remoteJid: quotedKey.remoteJid,
+                fromMe: quotedKey.fromMe,
+                participant: quotedKey.participant,
+              },
               message: { conversation: quotedKey.content || '' },
             },
           },
@@ -624,7 +631,12 @@ export class WhatsAppChannel implements Channel {
             { text: item.text },
             {
               quoted: {
-                key: item.quotedKey,
+                key: {
+                  id: item.quotedKey.id,
+                  remoteJid: item.quotedKey.remoteJid,
+                  fromMe: item.quotedKey.fromMe,
+                  participant: item.quotedKey.participant,
+                },
                 message: { conversation: item.quotedKey.content || '' },
               },
             },
@@ -642,3 +654,5 @@ export class WhatsAppChannel implements Channel {
     }
   }
 }
+
+registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));

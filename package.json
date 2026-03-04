@@ -1,6 +1,6 @@
 {
   "name": "nanoclaw",
-  "version": "1.1.6",
+  "version": "1.2.6",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
@@ -9,13 +9,13 @@
     "build:quick": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx scripts/apply-skills.ts && tsx watch src/index.ts",
-    "auth": "tsx src/whatsapp-auth.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
+    "auth": "tsx src/whatsapp-auth.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "generate-zmanim": "tsx scripts/generate-zmanim.ts",
@@ -26,6 +26,7 @@
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.36.0",
     "@hebcal/core": "^6.0.8",
+    "@types/qrcode-terminal": "^0.12.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
@@ -39,7 +40,6 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
-    "@types/qrcode-terminal": "^0.12.2",
     "@vitest/coverage-v8": "^4.0.18",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",

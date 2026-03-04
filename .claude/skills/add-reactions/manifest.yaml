@@ -3,8 +3,8 @@ version: 1.0.0
 description: "WhatsApp emoji reaction support with status tracking"
 core_version: 0.1.0
 adds:
-  - scripts/migrate-reactions.ts
   - container/skills/reactions/SKILL.md
+  - scripts/migrate-reactions.ts
   - src/status-tracker.ts
   - src/status-tracker.test.ts
 modifies:
@@ -19,6 +19,8 @@ modifies:
   - src/channels/whatsapp.test.ts
   - src/group-queue.test.ts
   - src/ipc-auth.test.ts
+modify_base:
+  src/ipc.ts: ipc-handler-registry
 conflicts: []
 depends: []
 test: "npx tsc --noEmit"

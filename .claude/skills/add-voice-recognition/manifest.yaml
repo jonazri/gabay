@@ -12,7 +12,7 @@ modifies:
   - src/config.ts
   - src/transcription.ts
 modify_base:
-  src/channels/whatsapp.ts: voice-transcription-elevenlabs
+  src/channels/whatsapp.ts: _accumulated
   src/channels/whatsapp.test.ts: voice-transcription-elevenlabs
   src/transcription.ts: _accumulated
 conflicts: []

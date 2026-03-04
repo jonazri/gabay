@@ -15,10 +15,6 @@ structured:
     - PERPLEXITY_API_KEY
 conflicts: []
 incompatible_with: []
-depends:
-  - auth-recovery
-  - google-home
-  - container-hardening
-  - whatsapp-search
+depends: []
 tested_with: []
 test: "npx tsc --noEmit"

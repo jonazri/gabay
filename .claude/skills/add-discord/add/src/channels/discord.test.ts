@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks ---
 
+// Mock registry (registerChannel runs at import time)
+vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
+
+// Mock env reader (used by the factory, not needed in unit tests)
+vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
@@ -155,9 +161,7 @@ function createMessage(overrides: {
     member: overrides.memberDisplayName
       ? { displayName: overrides.memberDisplayName }
       : null,
-    guild: overrides.guildName
-      ? { name: overrides.guildName }
-      : null,
+    guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
       messages: {
@@ -256,6 +260,8 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.any(String),
         'Test Server #general',
+        'discord',
+        true,
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
@@ -286,6 +292,8 @@ describe('DiscordChannel', () => {
         'dc:9999999999999999',
         expect.any(String),
         expect.any(String),
+        'discord',
+        true,
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
@@ -365,6 +373,8 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.any(String),
         'Alice',
+        'discord',
+        false,
       );
     });
 
@@ -384,6 +394,8 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.any(String),
         'My Server #bot-chat',
+        'discord',
+        true,
       );
     });
   });
@@ -627,8 +639,11 @@ describe('DiscordChannel', () => {
 
       await channel.sendMessage('dc:1234567890123456', 'Hello');
 
-      const fetchedChannel = await currentClient().channels.fetch('1234567890123456');
-      expect(currentClient().channels.fetch).toHaveBeenCalledWith('1234567890123456');
+      const fetchedChannel =
+        await currentClient().channels.fetch('1234567890123456');
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith(
+        '1234567890123456',
+      );
     });
 
     it('strips dc: prefix from JID', async () => {
