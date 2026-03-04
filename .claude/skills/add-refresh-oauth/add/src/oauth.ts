@@ -5,17 +5,42 @@ import path from 'path';
 
 import { logger } from './logger.js';
 
-export const AUTH_ERROR_PATTERN = /401|unauthorized|authentication|token.*expired|invalid.*token|expired.*token/i;
+export const AUTH_ERROR_PATTERN =
+  /401|unauthorized|authentication|token.*expired|invalid.*token|expired.*token/i;
 
-const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+const CREDENTIALS_PATH = path.join(
+  os.homedir(),
+  '.claude',
+  '.credentials.json',
+);
 const DOTENV_PATH = path.join(process.cwd(), '.env');
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
+ * Check if an externally-managed token is available (e.g. long-term token in
+ * bashrc/environment or .env file). When present, proactive refresh is
+ * unnecessary — the reactive safety nets handle the rare revocation case.
+ */
+function hasExternalToken(): boolean {
+  // Check process environment (e.g. bashrc, systemd Environment=)
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return true;
+
+  // Check .env file (systemd services don't source bashrc)
+  try {
+    const content = fs.readFileSync(DOTENV_PATH, 'utf-8');
+    return /^CLAUDE_CODE_OAUTH_TOKEN=.+$/m.test(content);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Sync the OAuth token from credentials file to .env if they differ.
- * This is a fast, in-process sync that avoids shelling out to refresh.sh.
+ * Skipped when a system-level token is available.
  */
 function syncTokenToEnv(): void {
+  if (hasExternalToken()) return;
+
   try {
     const creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf-8'));
     const credToken: string | undefined = creds?.claudeAiOauth?.accessToken;
@@ -47,11 +72,12 @@ function syncTokenToEnv(): void {
 
 /**
  * Ensure the OAuth token is fresh before spawning a container.
- * If the token is expired or within 5 minutes of expiry, refresh it.
- * Always syncs the credentials token to .env to prevent stale-token issues.
- * Returns true if a valid token is available, false if refresh failed.
+ * When a system-level token is set, always returns true (no check needed).
+ * Otherwise checks credentials file and refreshes if near expiry.
  */
 export async function ensureTokenFresh(): Promise<boolean> {
+  if (hasExternalToken()) return true;
+
   try {
     const raw = fs.readFileSync(CREDENTIALS_PATH, 'utf-8');
     const creds = JSON.parse(raw);
@@ -92,7 +118,7 @@ export function refreshOAuthToken(): Promise<boolean> {
         logger.error({ err }, 'OAuth refresh script failed');
         resolve(false);
       } else {
-        logger.info('OAuth token refreshed after auth error');
+        logger.info('OAuth token refreshed via refresh script');
         resolve(true);
       }
     });
@@ -101,7 +127,7 @@ export function refreshOAuthToken(): Promise<boolean> {
 
 const SCHEDULE_BUFFER_MS = 30 * 60 * 1000; // 30 minutes before expiry
 const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes on failure
-const MAX_DELAY_MS = 23 * 60 * 60 * 1000; // 23 hours — upper bound so long-lived tokens are still re-checked daily
+const MAX_DELAY_MS = 23 * 60 * 60 * 1000; // 23 hours
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -115,6 +141,16 @@ export function stopTokenRefreshScheduler(): void {
 export function startTokenRefreshScheduler(
   onAlert?: (msg: string) => void,
 ): void {
+  // System-level token (e.g. long-term token in bashrc) — no proactive refresh needed.
+  // Reactive safety nets (ensureTokenFresh pre-flight + auth error retry in runAgent)
+  // handle the rare case where the token is revoked.
+  if (hasExternalToken()) {
+    logger.info(
+      'External CLAUDE_CODE_OAUTH_TOKEN found, proactive refresh disabled',
+    );
+    return;
+  }
+
   let hadFailure = false;
 
   const schedule = () => {
@@ -127,14 +163,15 @@ export function startTokenRefreshScheduler(
       const expiresAt: number | undefined = creds?.claudeAiOauth?.expiresAt;
 
       if (!expiresAt) {
-        logger.debug('No expiresAt in credentials, scheduling retry');
-        refreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
+        logger.debug(
+          'No expiresAt in credentials, skipping proactive refresh scheduler',
+        );
         return;
       }
 
       const remainingMs = expiresAt - Date.now();
+
       if (remainingMs > SCHEDULE_BUFFER_MS) {
-        // Cap to MAX_DELAY_MS so the scheduler wakes up at least daily
         delayMs = Math.min(remainingMs - SCHEDULE_BUFFER_MS, MAX_DELAY_MS);
       } else {
         // Already close to expiry or expired — refresh soon
@@ -147,7 +184,6 @@ export function startTokenRefreshScheduler(
       );
     } catch (err) {
       logger.debug({ err }, 'Could not read credentials for scheduling');
-      refreshTimer = setTimeout(() => schedule(), RETRY_DELAY_MS);
       return;
     }
 
