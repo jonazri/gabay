@@ -257,57 +257,482 @@ await mcp__nanoclaw__send_message({
 });
 ```
 
-### Backend Implementation
+### Backend Implementation Architecture
 
-Use GitHub REST API with user's authenticated session:
+**Security Model:** Instead of giving the container direct access to GitHub CLI (`gh`), which would provide full GitHub API access, this implementation uses a **custom Gist CLI tool** (`gist`) with a **host-side proxy component**.
 
-```javascript
-const { Octokit } = require('@octokit/rest');
+**Architecture:**
 
-async function createGist(params) {
-  // Use GitHub OAuth token from user's session
-  const octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN  // Or user's OAuth token
-  });
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Container (Andy)                                            │
+│                                                             │
+│  Andy invokes:                                             │
+│  $ gist create config.yaml --description "My config"       │
+│                                                             │
+│  Custom CLI tool: /usr/local/bin/gist                     │
+│  ├── Validates input                                       │
+│  ├── Formats request JSON                                  │
+│  └── Sends to host via IPC socket                         │
+│                                                             │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ IPC Socket
+                  │ /workspace/ipc/gist_requests/
+                  ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Host System (Gist Proxy Service)                           │
+│                                                             │
+│  Gist Proxy Daemon:                                        │
+│  ├── Reads requests from IPC directory                     │
+│  ├── Validates against allowlist:                          │
+│  │   • Only gist operations (no repos, issues, PRs)        │
+│  │   • Rate limiting (10 gists/hour)                       │
+│  │   • Size limits (10 MB per file)                        │
+│  ├── Calls GitHub API using host's gh auth                 │
+│  └── Returns response via IPC                              │
+│                                                             │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ HTTPS
+                  ▼
+            GitHub API (/gists endpoint)
+```
 
-  const response = await octokit.gists.create({
-    files: params.files,
-    description: params.description || 'Created by Andy',
-    public: params.public || false
-  });
+**Key Security Benefits:**
+1. **Scoped access:** Container can ONLY create/read gists, not access repos, issues, or other GitHub resources
+2. **Rate limiting:** Host enforces per-hour limits to prevent abuse
+3. **Validation:** Host validates all parameters before GitHub API calls
+4. **Auditability:** All gist operations logged on host
+5. **Credential isolation:** GitHub auth token never exposed to container
 
-  // Extract raw URLs for each file
-  const raw_urls = {};
-  for (const [filename, fileData] of Object.entries(response.data.files)) {
-    raw_urls[filename] = fileData.raw_url;
+### Custom Gist CLI Tool
+
+The container has access to a custom `gist` CLI tool (not the full `gh` CLI):
+
+```bash
+# Container has this tool available:
+/usr/local/bin/gist
+
+# Usage:
+gist create <file> [--description "text"] [--public]
+gist create-multi <dir> [--description "text"]
+gist read <gist_id>
+gist diff <gist_id> [--from <sha>] [--to <sha>]
+gist apply <gist_id> <target_dir> [--dry-run]
+gist list [--limit 10]
+```
+
+**Tool Capabilities (Allowed Operations Only):**
+- Create gist (single or multi-file)
+- Read gist content
+- Get gist diff between versions
+- Apply gist to local directory
+- List recent gists
+
+**Not Allowed (Security Boundary):**
+- Access to repositories
+- Create/modify issues or PRs
+- Access to GitHub Actions
+- Organization/team management
+- Any non-gist GitHub API operations
+
+### Host-Side Proxy Implementation
+
+**IPC Directory Structure:**
+```
+/workspace/ipc/
+├── gist_requests/
+│   ├── create_1709584320123.json     # Request from container
+│   └── create_1709584320123.response.json  # Response from host
+└── gist_proxy.log                    # Audit log
+```
+
+**Request Format (Container → Host):**
+```json
+{
+  "operation": "create",
+  "request_id": "1709584320123",
+  "timestamp": "2026-03-04T19:30:00Z",
+  "params": {
+    "files": {
+      "config.yaml": {
+        "content": "server:\n  port: 8080\n..."
+      }
+    },
+    "description": "My configuration",
+    "public": false
   }
-
-  return {
-    url: response.data.html_url,
-    html_url: response.data.html_url,
-    raw_urls,
-    gist_id: response.data.id
-  };
 }
 ```
 
-### Authentication
-
-Use GitHub CLI (`gh`) authentication which is already available in the container:
-
-```bash
-# Check if authenticated
-gh auth status
-
-# Use gh api to create gist
-gh api /gists \
-  -X POST \
-  -f description="Created by Andy" \
-  -f public=false \
-  -f 'files[filename.txt][content]=file content here'
+**Response Format (Host → Container):**
+```json
+{
+  "request_id": "1709584320123",
+  "status": "success",
+  "timestamp": "2026-03-04T19:30:01Z",
+  "result": {
+    "url": "https://gist.github.com/username/abc123def456",
+    "html_url": "https://gist.github.com/username/abc123def456",
+    "gist_id": "abc123def456",
+    "raw_urls": {
+      "config.yaml": "https://gist.githubusercontent.com/username/abc123def456/raw/config.yaml"
+    }
+  }
+}
 ```
 
-This leverages existing GitHub authentication without requiring new OAuth flows.
+**Error Response:**
+```json
+{
+  "request_id": "1709584320123",
+  "status": "error",
+  "timestamp": "2026-03-04T19:30:01Z",
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Maximum 10 gists per hour exceeded. Try again in 45 minutes."
+  }
+}
+```
+
+**Host Proxy Service (Systemd):**
+
+```javascript
+// /usr/local/bin/gist-proxy-daemon
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+const chokidar = require('chokidar');
+
+const IPC_DIR = '/workspace/ipc/gist_requests';
+const RATE_LIMIT = 10; // gists per hour
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+class GistProxy {
+  constructor() {
+    this.requestCounts = new Map(); // Track rate limits
+  }
+
+  async start() {
+    console.log('Gist proxy daemon starting...');
+
+    // Watch for new request files
+    const watcher = chokidar.watch(`${IPC_DIR}/*.json`, {
+      ignored: /\.response\.json$/,
+      persistent: true
+    });
+
+    watcher.on('add', async (filepath) => {
+      await this.handleRequest(filepath);
+    });
+
+    console.log(`Watching ${IPC_DIR} for gist requests`);
+  }
+
+  async handleRequest(filepath) {
+    const request = JSON.parse(fs.readFileSync(filepath, 'utf8'));
+    const responseFile = filepath.replace('.json', '.response.json');
+
+    try {
+      // Validate request
+      this.validateRequest(request);
+
+      // Check rate limit
+      this.checkRateLimit();
+
+      // Execute operation
+      let result;
+      switch (request.operation) {
+        case 'create':
+          result = await this.createGist(request.params);
+          break;
+        case 'read':
+          result = await this.readGist(request.params);
+          break;
+        case 'diff':
+          result = await this.getGistDiff(request.params);
+          break;
+        case 'list':
+          result = await this.listGists(request.params);
+          break;
+        default:
+          throw new Error(`Unknown operation: ${request.operation}`);
+      }
+
+      // Write success response
+      fs.writeFileSync(responseFile, JSON.stringify({
+        request_id: request.request_id,
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        result
+      }));
+
+      // Log operation
+      this.logOperation(request, 'success');
+
+    } catch (error) {
+      // Write error response
+      fs.writeFileSync(responseFile, JSON.stringify({
+        request_id: request.request_id,
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        error: {
+          code: error.code || 'UNKNOWN_ERROR',
+          message: error.message
+        }
+      }));
+
+      // Log error
+      this.logOperation(request, 'error', error.message);
+    }
+
+    // Clean up request file
+    fs.unlinkSync(filepath);
+  }
+
+  validateRequest(request) {
+    // Validate operation
+    const allowedOps = ['create', 'read', 'diff', 'list', 'apply'];
+    if (!allowedOps.includes(request.operation)) {
+      throw { code: 'INVALID_OPERATION', message: 'Operation not allowed' };
+    }
+
+    // Validate file sizes
+    if (request.operation === 'create') {
+      for (const [filename, fileData] of Object.entries(request.params.files || {})) {
+        const size = Buffer.byteLength(fileData.content, 'utf8');
+        if (size > MAX_FILE_SIZE) {
+          throw { code: 'FILE_TOO_LARGE', message: `File ${filename} exceeds 10 MB limit` };
+        }
+      }
+    }
+
+    // Additional validation rules...
+  }
+
+  checkRateLimit() {
+    const now = Date.now();
+    const hourAgo = now - (60 * 60 * 1000);
+
+    // Clean old entries
+    for (const [timestamp, count] of this.requestCounts.entries()) {
+      if (timestamp < hourAgo) {
+        this.requestCounts.delete(timestamp);
+      }
+    }
+
+    // Count recent requests
+    const recentCount = Array.from(this.requestCounts.values())
+      .reduce((sum, count) => sum + count, 0);
+
+    if (recentCount >= RATE_LIMIT) {
+      throw {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: `Maximum ${RATE_LIMIT} gists per hour exceeded`
+      };
+    }
+
+    // Record this request
+    this.requestCounts.set(now, 1);
+  }
+
+  async createGist(params) {
+    // Build gh api command
+    const filesArg = Object.entries(params.files || {})
+      .map(([name, data]) => `-f 'files[${name}][content]=${data.content}'`)
+      .join(' ');
+
+    const cmd = `gh api /gists -X POST \
+      -f description="${params.description || 'Created by Andy'}" \
+      -f public=${params.public || false} \
+      ${filesArg}`;
+
+    return new Promise((resolve, reject) => {
+      exec(cmd, (error, stdout, stderr) => {
+        if (error) {
+          reject({ code: 'GITHUB_API_ERROR', message: stderr });
+          return;
+        }
+
+        const response = JSON.parse(stdout);
+
+        // Extract raw URLs
+        const raw_urls = {};
+        for (const [filename, fileData] of Object.entries(response.files)) {
+          raw_urls[filename] = fileData.raw_url;
+        }
+
+        resolve({
+          url: response.html_url,
+          html_url: response.html_url,
+          gist_id: response.id,
+          raw_urls
+        });
+      });
+    });
+  }
+
+  async readGist(params) {
+    const cmd = `gh api /gists/${params.gist_id}`;
+
+    return new Promise((resolve, reject) => {
+      exec(cmd, (error, stdout, stderr) => {
+        if (error) {
+          reject({ code: 'GITHUB_API_ERROR', message: stderr });
+          return;
+        }
+
+        const gist = JSON.parse(stdout);
+
+        resolve({
+          gist_id: gist.id,
+          description: gist.description,
+          url: gist.html_url,
+          files: gist.files,
+          created_at: gist.created_at,
+          updated_at: gist.updated_at
+        });
+      });
+    });
+  }
+
+  logOperation(request, status, error = null) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      request_id: request.request_id,
+      operation: request.operation,
+      status,
+      error
+    };
+
+    fs.appendFileSync(
+      '/workspace/ipc/gist_proxy.log',
+      JSON.stringify(logEntry) + '\n'
+    );
+  }
+}
+
+// Start daemon
+const proxy = new GistProxy();
+proxy.start();
+```
+
+**Systemd Service:**
+```ini
+[Unit]
+Description=Gist Proxy Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=<host-user>
+ExecStart=/usr/local/bin/gist-proxy-daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Container-Side Gist CLI Tool
+
+```bash
+#!/bin/bash
+# /usr/local/bin/gist
+
+IPC_DIR="/workspace/ipc/gist_requests"
+REQUEST_ID=$(date +%s%N)
+
+# Ensure IPC directory exists
+mkdir -p "$IPC_DIR"
+
+case "$1" in
+  create)
+    FILE="$2"
+    DESCRIPTION="${3:---description}"
+    DESC_VALUE="$4"
+
+    if [[ ! -f "$FILE" ]]; then
+      echo "Error: File not found: $FILE" >&2
+      exit 1
+    fi
+
+    # Read file content
+    CONTENT=$(cat "$FILE")
+
+    # Create request
+    cat > "$IPC_DIR/create_${REQUEST_ID}.json" <<EOF
+{
+  "operation": "create",
+  "request_id": "${REQUEST_ID}",
+  "timestamp": "$(date -Iseconds)",
+  "params": {
+    "files": {
+      "$(basename "$FILE")": {
+        "content": $(echo "$CONTENT" | jq -Rs .)
+      }
+    },
+    "description": "$DESC_VALUE",
+    "public": false
+  }
+}
+EOF
+
+    # Wait for response (with timeout)
+    RESPONSE_FILE="$IPC_DIR/create_${REQUEST_ID}.response.json"
+    TIMEOUT=30
+    ELAPSED=0
+
+    while [[ ! -f "$RESPONSE_FILE" ]] && [[ $ELAPSED -lt $TIMEOUT ]]; do
+      sleep 0.5
+      ELAPSED=$((ELAPSED + 1))
+    done
+
+    if [[ ! -f "$RESPONSE_FILE" ]]; then
+      echo "Error: Request timeout" >&2
+      exit 1
+    fi
+
+    # Parse response
+    RESPONSE=$(cat "$RESPONSE_FILE")
+    rm "$RESPONSE_FILE"
+
+    STATUS=$(echo "$RESPONSE" | jq -r '.status')
+
+    if [[ "$STATUS" == "success" ]]; then
+      URL=$(echo "$RESPONSE" | jq -r '.result.url')
+      echo "$URL"
+      exit 0
+    else
+      ERROR=$(echo "$RESPONSE" | jq -r '.error.message')
+      echo "Error: $ERROR" >&2
+      exit 1
+    fi
+    ;;
+
+  read)
+    GIST_ID="$2"
+
+    cat > "$IPC_DIR/read_${REQUEST_ID}.json" <<EOF
+{
+  "operation": "read",
+  "request_id": "${REQUEST_ID}",
+  "timestamp": "$(date -Iseconds)",
+  "params": {
+    "gist_id": "$GIST_ID"
+  }
+}
+EOF
+
+    # Similar wait-for-response logic...
+    # [implementation similar to create]
+    ;;
+
+  *)
+    echo "Usage: gist <create|read|diff|apply|list> [options]" >&2
+    exit 1
+    ;;
+esac
+```
 
 ## Alternatives Considered
 
@@ -338,9 +763,36 @@ This leverages existing GitHub authentication without requiring new OAuth flows.
 
 ## Acceptance Criteria
 
-### Creating Gists
+### Host-Side Proxy
+- [ ] Gist proxy daemon installed on host
+- [ ] Systemd service configured and running
+- [ ] IPC directory `/workspace/ipc/gist_requests/` created with correct permissions
+- [ ] Proxy validates all operations against allowlist
+- [ ] Rate limiting enforced (10 gists/hour default)
+- [ ] File size validation (10 MB per file, 100 MB total)
+- [ ] Audit logging to `/var/log/gist-proxy-audit.log`
+- [ ] Uses host's `gh` authentication (user must be logged in on host)
+- [ ] Error responses written to `.response.json` files
+- [ ] Request cleanup (delete processed request files)
+- [ ] Graceful handling of GitHub API errors
+- [ ] Timeout handling for slow GitHub API calls
+
+### Container-Side CLI Tool
+- [ ] Custom `gist` CLI tool available at `/usr/local/bin/gist`
+- [ ] `gist create <file>` command works
+- [ ] `gist create-multi <dir>` for multiple files
+- [ ] `gist read <gist_id>` command works
+- [ ] `gist diff <gist_id>` command works
+- [ ] `gist list` command works
+- [ ] `gist apply <gist_id> <target>` command works
+- [ ] Timeout handling (30 second default)
+- [ ] Clear error messages for all failure modes
+- [ ] No direct access to `gh` CLI in container
+- [ ] No direct access to GitHub API from container
+
+### MCP Tool Integration
 - [ ] `mcp__nanoclaw__create_gist` tool available in container
-- [ ] Uses user's existing GitHub authentication (via `gh` CLI)
+- [ ] Tool calls `gist create` CLI under the hood
 - [ ] Creates private gists by default
 - [ ] Supports single-file gists
 - [ ] Supports multi-file gists
@@ -348,10 +800,10 @@ This leverages existing GitHub authentication without requiring new OAuth flows.
 - [ ] Returns raw file URLs for direct download
 - [ ] Optional description parameter
 - [ ] Optional public flag (defaults to false)
-- [ ] Error handling for auth failures
-- [ ] Error handling for API rate limits
-- [ ] Works when GitHub is authenticated via `gh auth login`
-- [ ] Fails gracefully with clear message if not authenticated
+- [ ] Error handling for proxy failures
+- [ ] Error handling for rate limits
+- [ ] Error handling for file size limits
+- [ ] Fails gracefully with clear message if proxy is down
 
 ### Reading Gists
 - [ ] `mcp__nanoclaw__read_gist` tool available
@@ -381,23 +833,50 @@ This leverages existing GitHub authentication without requiring new OAuth flows.
 ## Technical Notes
 
 ### Relevant Files
-- MCP tool registry (add `mcp__nanoclaw__create_gist`)
-- GitHub integration module (new or extend existing)
+
+**Host-Side:**
+- `/usr/local/bin/gist-proxy-daemon` - Proxy daemon (Node.js)
+- `/etc/systemd/system/gist-proxy.service` - Systemd service
+- `/etc/gist-proxy/config.yaml` - Configuration
+- `/var/log/gist-proxy-audit.log` - Audit log
+- `/workspace/ipc/gist_requests/` - IPC directory
+
+**Container-Side:**
+- `/usr/local/bin/gist` - Custom CLI tool (bash)
+- MCP tool: `mcp__nanoclaw__create_gist` (calls `gist` CLI)
+- MCP tool: `mcp__nanoclaw__read_gist`
+- MCP tool: `mcp__nanoclaw__get_gist_diff`
+- MCP tool: `mcp__nanoclaw__apply_gist_changes`
+
+### Dependencies
+
+**Host:**
+- Node.js (for proxy daemon)
+- `gh` CLI (authenticated with GitHub)
+- `chokidar` npm package (file watching)
+- `jq` (JSON parsing in bash)
+
+**Container:**
+- `bash` (for gist CLI tool)
+- `jq` (JSON parsing)
+- Standard UNIX tools (cat, date, mkdir)
 
 ### GitHub API Details
 
 **Endpoint:** `POST /gists`
 
-**Authentication:** Personal Access Token or OAuth
+**Authentication:** Via host's `gh` CLI (user must run `gh auth login` on host)
 
 **Rate Limits:**
-- Authenticated: 5,000 requests/hour
-- Creating gists: Unlikely to hit limit in normal usage
+- GitHub API: 5,000 requests/hour (authenticated)
+- Host proxy: 10 gists/hour (configurable, default)
+- Host limit applies first for security
 
 **Gist Size Limits:**
-- Single file: 100 MB
-- Total gist: 100 MB
-- Large gists may be slow to render
+- Single file: 100 MB (GitHub limit)
+- Total gist: 100 MB (GitHub limit)
+- Host enforces: 10 MB per file (configurable, more conservative)
+- Large gists may be slow to render on GitHub
 
 ### Error Handling
 
@@ -420,57 +899,162 @@ try {
 
 ### Security Considerations
 
-- Gists are private by default → user's GitHub account controls access
-- Sensitive data warning: Remind user that gists are stored on GitHub
-- Consider adding confirmation prompt for files containing secrets/keys
-- Gist URLs are unguessable (long random IDs) but not encrypted
-- User can delete gists manually from GitHub at any time
+**Defense-in-Depth Approach:**
 
-### GitHub CLI Integration
+1. **Scoped Access (Primary Defense)**
+   - Container has ZERO direct access to GitHub API
+   - Custom `gist` CLI tool only allows gist operations
+   - No access to repos, issues, PRs, Actions, or org management
+   - Host proxy validates all operations before forwarding to GitHub
 
-Container already has `gh` CLI available. Check authentication status:
+2. **Rate Limiting**
+   - Host enforces 10 gists per hour limit
+   - Prevents abuse or runaway scripts
+   - Configurable per-user or per-group
 
+3. **Size Limits**
+   - 10 MB per file maximum
+   - 100 MB total gist size (GitHub's limit)
+   - Prevents resource exhaustion
+
+4. **Validation & Sanitization**
+   - Host validates all parameters before GitHub API calls
+   - Filename sanitization (no path traversal)
+   - Content validation (encoding, special characters)
+
+5. **Audit Trail**
+   - All gist operations logged on host
+   - Timestamps, request IDs, operation types
+   - Success/failure status for security review
+
+6. **Data Privacy**
+   - Gists are private by default
+   - User's GitHub account controls access
+   - Gist URLs are unguessable (long random IDs) but not encrypted
+   - Sensitive data warning: Remind user that gists are stored on GitHub
+   - Consider adding confirmation prompt for files containing secrets/keys
+
+7. **Credential Isolation**
+   - GitHub auth token NEVER exposed to container
+   - Host proxy uses host-side `gh` authentication
+   - Container cannot read or modify GitHub credentials
+
+8. **Failure Safety**
+   - If proxy daemon is down, operations fail gracefully
+   - Clear error messages to user
+   - No silent failures or data loss
+
+**Security Benefits vs. Direct gh CLI Access:**
+
+| Aspect | Direct `gh` CLI | Custom `gist` Tool |
+|--------|-----------------|-------------------|
+| **Scope** | Full GitHub API | Gist operations only |
+| **Repos** | Full access | ❌ No access |
+| **Issues/PRs** | Full access | ❌ No access |
+| **Actions** | Full access | ❌ No access |
+| **Rate Limiting** | GitHub's limits | Host-enforced limits |
+| **Audit Trail** | GitHub audit log | Host + GitHub logs |
+| **Credential Exposure** | In container | Host only |
+| **Attack Surface** | Large | Minimal |
+
+### Custom Gist CLI vs. GitHub CLI
+
+The container uses a **custom `gist` command** instead of GitHub's `gh` CLI:
+
+**What the container has:**
 ```bash
-gh auth status
-# Returns: Logged in to github.com as username
+$ gist create config.yaml --description "My config"
+$ gist read abc123def456
+$ gist list
 ```
 
-Use `gh api` for all gist operations:
-
-#### Create Gist
+**What the container does NOT have:**
 ```bash
-gh api /gists -X POST \
-  -f description="My config" \
-  -f public=false \
-  -f 'files[config.json][content]={"key":"value"}'
-# Returns JSON with html_url, id
+$ gh repo clone    # ❌ Not available
+$ gh issue create  # ❌ Not available
+$ gh pr create     # ❌ Not available
+$ gh api /repos    # ❌ Not available
 ```
 
-#### Read Gist
-```bash
-gh api /gists/{gist_id}
-# Returns JSON with files, description, created_at, updated_at, history array
+**Why This Matters:**
+
+If the container had full `gh` CLI access:
+- Could read/write any repo you have access to
+- Could create/modify issues and pull requests
+- Could trigger GitHub Actions workflows
+- Could modify organization settings
+- Complete GitHub account access from compromised container
+
+With custom `gist` tool:
+- Can ONLY create/read gists
+- No repo access
+- No issue/PR access
+- No Actions access
+- Minimal blast radius if container compromised
+
+### Host Proxy Implementation Details
+
+**Installation:**
+
+1. Create proxy daemon: `/usr/local/bin/gist-proxy-daemon` (Node.js script above)
+2. Create systemd service: `/etc/systemd/system/gist-proxy.service`
+3. Enable and start:
+   ```bash
+   sudo systemctl enable gist-proxy
+   sudo systemctl start gist-proxy
+   ```
+
+**Configuration:**
+
+```yaml
+# /etc/gist-proxy/config.yaml
+rate_limits:
+  gists_per_hour: 10
+  max_file_size_mb: 10
+
+security:
+  allowed_operations:
+    - create
+    - read
+    - diff
+    - list
+    - apply
+
+  validation:
+    max_files_per_gist: 50
+    allowed_extensions: "*"  # or specific list
+
+logging:
+  audit_log: /var/log/gist-proxy-audit.log
+  level: info
 ```
 
-#### Get Gist History
+**Monitoring:**
+
 ```bash
-gh api /gists/{gist_id}/commits
-# Returns array of commits with version SHA, committed_at, change_status
+# View recent gist operations
+tail -f /var/log/gist-proxy-audit.log
+
+# Check rate limits
+gist-proxy-admin stats
+
+# View active requests
+ls /workspace/ipc/gist_requests/
 ```
 
-#### Get Specific Version
-```bash
-gh api /gists/{gist_id}/{sha}
-# Returns gist content at specific commit
-```
+**Troubleshooting:**
 
-#### Download Raw File
 ```bash
-curl -L {raw_url}
-# Direct download of file content
-```
+# Check proxy daemon status
+systemctl status gist-proxy
 
-This is simpler than managing Octokit dependencies and OAuth tokens.
+# View logs
+journalctl -u gist-proxy -f
+
+# Test proxy manually
+echo '{"operation":"list","request_id":"test"}' > /workspace/ipc/gist_requests/test.json
+cat /workspace/ipc/gist_requests/test.response.json
+```
 
 ## Use Cases Unlocked
 
