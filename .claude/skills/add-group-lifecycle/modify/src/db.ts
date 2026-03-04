@@ -682,6 +682,10 @@ function migrateJsonState(): void {
   if (groups) {
     for (const [jid, group] of Object.entries(groups)) {
       try {
+        // Preserve main group flag during JSON→SQLite migration
+        if (group.folder === 'main' && !group.isMain) {
+          group.isMain = true;
+        }
         setRegisteredGroup(jid, group);
       } catch (err) {
         logger.warn(
