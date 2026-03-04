@@ -115,6 +115,14 @@ export async function run(args: string[]): Promise<void> {
     requires_trigger INTEGER DEFAULT 1,
     is_main INTEGER DEFAULT 0
   )`);
+  // Migration: add is_main column if table predates this version
+  try {
+    db.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   const isMainInt = parsed.isMain ? 1 : 0;
 
