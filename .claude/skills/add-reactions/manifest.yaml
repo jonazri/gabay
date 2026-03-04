@@ -4,6 +4,7 @@ description: "WhatsApp emoji reaction support with status tracking"
 core_version: 0.1.0
 adds:
   - container/skills/reactions/SKILL.md
+  - scripts/migrate-reactions.ts
   - src/status-tracker.ts
   - src/status-tracker.test.ts
 modifies:
