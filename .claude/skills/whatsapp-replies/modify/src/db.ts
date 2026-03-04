@@ -41,9 +41,6 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
-      replied_to_id TEXT,
-      replied_to_sender TEXT,
-      replied_to_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -132,13 +129,17 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-  // Add reply context columns if they don't exist (migration for existing DBs)
+  // Add is_main column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_id TEXT`);
-    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_sender TEXT`);
-    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_content TEXT`);
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+    );
+    // Backfill: existing rows with folder = 'main' are the main group
+    database.exec(
+      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
   } catch {
-    /* columns already exist */
+    /* column already exists */
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -284,7 +285,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -294,14 +295,11 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-    msg.replied_to_id ?? null,
-    msg.replied_to_sender ?? null,
-    msg.replied_to_content ?? null,
   );
 }
 
 /**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
+ * Store a message directly.
  */
 export function storeMessageDirect(msg: {
   id: string;
@@ -312,12 +310,9 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
-  replied_to_id?: string;
-  replied_to_sender?: string;
-  replied_to_content?: string;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -327,9 +322,6 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-    msg.replied_to_id ?? null,
-    msg.replied_to_sender ?? null,
-    msg.replied_to_content ?? null,
   );
 }
 
@@ -344,7 +336,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, replied_to_id, replied_to_sender, replied_to_content
+    SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -372,7 +364,7 @@ export function getMessagesSince(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, replied_to_id, replied_to_sender, replied_to_content
+    SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -384,24 +376,22 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
-export function getMessageById(id: string, chatJid: string): NewMessage | undefined {
-  return db
-    .prepare(
-      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content FROM messages WHERE id = ? AND chat_jid = ?`,
-    )
-    .get(id, chatJid) as NewMessage | undefined;
-}
-
 export function getMessageFromMe(messageId: string, chatJid: string): boolean {
   const row = db
-    .prepare(`SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`)
+    .prepare(
+      `SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
     .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
   return row?.is_from_me === 1;
 }
 
-export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean } | undefined {
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; fromMe: boolean } | undefined {
   const row = db
-    .prepare(`SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
+    .prepare(
+      `SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
     .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
   if (!row) return undefined;
   return { id: row.id, fromMe: row.is_from_me === 1 };
@@ -410,95 +400,33 @@ export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean
 export function storeReaction(reaction: Reaction): void {
   if (!reaction.emoji) {
     db.prepare(
-      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`
+      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`,
     ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
     return;
   }
   db.prepare(
     `INSERT OR REPLACE INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     reaction.message_id,
     reaction.message_chat_jid,
     reaction.reactor_jid,
     reaction.reactor_name || null,
     reaction.emoji,
-    reaction.timestamp
+    reaction.timestamp,
   );
 }
 
-export function getReactionsForMessage(
+/** Test-only helper — query reactions for a message. Not used in production. */
+export function _getReactionsForMessage(
   messageId: string,
-  chatJid: string
+  chatJid: string,
 ): Reaction[] {
   return db
     .prepare(
-      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`
+      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`,
     )
     .all(messageId, chatJid) as Reaction[];
-}
-
-export function getMessagesByReaction(
-  reactorJid: string,
-  emoji: string,
-  chatJid?: string
-): Array<Reaction & { content: string; sender_name: string; message_timestamp: string }> {
-  const sql = chatJid
-    ? `
-      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
-      FROM reactions r
-      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
-      WHERE r.reactor_jid = ? AND r.emoji = ? AND r.message_chat_jid = ?
-      ORDER BY r.timestamp DESC
-    `
-    : `
-      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
-      FROM reactions r
-      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
-      WHERE r.reactor_jid = ? AND r.emoji = ?
-      ORDER BY r.timestamp DESC
-    `;
-
-  type Result = Reaction & { content: string; sender_name: string; message_timestamp: string };
-  return chatJid
-    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
-    : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
-}
-
-export function getReactionsByUser(
-  reactorJid: string,
-  limit: number = 50
-): Reaction[] {
-  return db
-    .prepare(
-      `SELECT * FROM reactions WHERE reactor_jid = ? ORDER BY timestamp DESC LIMIT ?`
-    )
-    .all(reactorJid, limit) as Reaction[];
-}
-
-export function getReactionStats(chatJid?: string): Array<{
-  emoji: string;
-  count: number;
-}> {
-  const sql = chatJid
-    ? `
-      SELECT emoji, COUNT(*) as count
-      FROM reactions
-      WHERE message_chat_jid = ?
-      GROUP BY emoji
-      ORDER BY count DESC
-    `
-    : `
-      SELECT emoji, COUNT(*) as count
-      FROM reactions
-      GROUP BY emoji
-      ORDER BY count DESC
-    `;
-
-  type Result = { emoji: string; count: number };
-  return chatJid
-    ? (db.prepare(sql).all(chatJid) as Result[])
-    : (db.prepare(sql).all() as Result[]);
 }
 
 export function createTask(
@@ -691,6 +619,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        is_main: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -712,6 +641,7 @@ export function getRegisteredGroup(
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isMain: row.is_main === 1 ? true : undefined,
   };
 }
 
@@ -720,8 +650,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -730,6 +660,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    group.isMain ? 1 : 0,
   );
 }
 
@@ -749,6 +680,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -769,6 +701,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      isMain: row.is_main === 1 ? true : undefined,
     };
   }
   return result;
@@ -825,6 +758,10 @@ function migrateJsonState(): void {
   if (groups) {
     for (const [jid, group] of Object.entries(groups)) {
       try {
+        // Preserve main group flag during JSON→SQLite migration
+        if (group.folder === 'main' && !group.isMain) {
+          group.isMain = true;
+        }
         setRegisteredGroup(jid, group);
       } catch (err) {
         logger.warn(

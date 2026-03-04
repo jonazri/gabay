@@ -8,6 +8,7 @@ vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
+  OWNER_NAME: 'Yaz',
 }));
 
 // Mock logger
@@ -23,25 +24,21 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
-  getLatestMessage: vi.fn(() => undefined),
-  getMessageFromMe: vi.fn(() => false),
   setLastGroupSync: vi.fn(),
-  storeReaction: vi.fn(),
   updateChatName: vi.fn(),
 }));
 
 // Mock transcription
 vi.mock('../transcription.js', () => ({
   isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
-  transcribeAudioMessage: vi
-    .fn()
-    .mockResolvedValue({
-      transcript: 'Hello this is a voice message',
-      audioBuffer: Buffer.from('fake-audio'),
-    }),
+  transcribeAudioMessage: vi.fn().mockResolvedValue({
+    transcript: 'Hello this is a voice message',
+    audioBuffer: Buffer.from('fake-audio'),
+  }),
 }));
 
 import { transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 
 // Mock voice recognition
 vi.mock('../voice-recognition.js', () => ({
@@ -49,7 +46,9 @@ vi.mock('../voice-recognition.js', () => ({
     speaker: null,
     similarity: 0,
     confidence: 'low',
+    embedding: [],
   }),
+  updateVoiceProfile: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock fs
@@ -669,105 +668,72 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('extracts reply context from extendedTextMessage.contextInfo', async () => {
+    it('auto-updates voice profile when owner is identified with high similarity', async () => {
+      vi.mocked(identifySpeaker).mockResolvedValueOnce({
+        speaker: 'Yaz',
+        similarity: 0.8,
+        confidence: 'high',
+        embedding: [0.1, 0.2, 0.3],
+      });
+
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
+
       await connectChannel(channel);
 
       await triggerMessages([
         {
           key: {
-            id: 'reply-msg-1',
+            id: 'msg-autoupdate',
             remoteJid: 'registered@g.us',
             participant: '5551234@s.whatsapp.net',
             fromMe: false,
           },
           message: {
-            extendedTextMessage: {
-              text: 'Great point!',
-              contextInfo: {
-                stanzaId: 'original-msg-id',
-                participant: 'bob@s.whatsapp.net',
-                quotedMessage: { conversation: 'The original message' },
-              },
-            },
+            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
           },
-          pushName: 'Alice',
+          pushName: 'Yaz',
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          content: 'Great point!',
-          replied_to_id: 'original-msg-id',
-          replied_to_sender: 'bob@s.whatsapp.net',
-          replied_to_content: 'The original message',
-        }),
-      );
-    });
-
-    it('passes undefined reply fields when no contextInfo present', async () => {
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-      await connectChannel(channel);
-
-      await triggerMessages([
-        {
-          key: {
-            id: 'plain-msg-1',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
-            fromMe: false,
-          },
-          message: { conversation: 'Just a plain message' },
-          pushName: 'Alice',
-          messageTimestamp: Math.floor(Date.now() / 1000),
-        },
+      expect(vi.mocked(updateVoiceProfile)).toHaveBeenCalledWith('Yaz', [
+        [0.1, 0.2, 0.3],
       ]);
-
-      const call = vi.mocked(opts.onMessage).mock.calls[0][1];
-      expect(call.replied_to_id).toBeUndefined();
-      expect(call.replied_to_sender).toBeUndefined();
-      expect(call.replied_to_content).toBeUndefined();
     });
 
-    it('extracts reply context from imageMessage.contextInfo', async () => {
+    it('skips auto-update when similarity is below threshold', async () => {
+      vi.mocked(identifySpeaker).mockResolvedValueOnce({
+        speaker: 'Yaz',
+        similarity: 0.5,
+        confidence: 'low',
+        embedding: [0.1, 0.2, 0.3],
+      });
+
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
+
       await connectChannel(channel);
+
+      vi.mocked(updateVoiceProfile).mockClear();
 
       await triggerMessages([
         {
           key: {
-            id: 'img-reply-1',
+            id: 'msg-noupdate',
             remoteJid: 'registered@g.us',
             participant: '5551234@s.whatsapp.net',
             fromMe: false,
           },
           message: {
-            imageMessage: {
-              caption: 'Look at this',
-              contextInfo: {
-                stanzaId: 'quoted-id',
-                participant: 'carol@s.whatsapp.net',
-                quotedMessage: { conversation: 'Quoted text' },
-              },
-            },
+            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
           },
-          pushName: 'Alice',
+          pushName: 'Yaz',
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          replied_to_id: 'quoted-id',
-          replied_to_sender: 'carol@s.whatsapp.net',
-        }),
-      );
+      expect(vi.mocked(updateVoiceProfile)).not.toHaveBeenCalled();
     });
 
     it('uses sender JID when pushName is absent', async () => {
@@ -1156,61 +1122,6 @@ describe('WhatsAppChannel', () => {
     it('does not expose prefixAssistantName (prefix handled internally)', () => {
       const channel = new WhatsAppChannel(createTestOpts());
       expect('prefixAssistantName' in channel).toBe(false);
-    });
-  });
-
-  // --- sendMessage with quotedKey ---
-
-  describe('sendMessage with quotedKey', () => {
-    it('passes quoted option to Baileys when quotedKey provided', async () => {
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-      await connectChannel(channel);
-
-      await channel.sendMessage('registered@g.us', 'My reply', {
-        id: 'original-id',
-        remoteJid: 'registered@g.us',
-        fromMe: false,
-        participant: 'bob@s.whatsapp.net',
-        content: 'The original text',
-      });
-
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ text: expect.stringContaining('My reply') }),
-        expect.objectContaining({
-          quoted: expect.objectContaining({
-            key: expect.objectContaining({ id: 'original-id' }),
-          }),
-        }),
-      );
-    });
-
-    it('sends plain message when no quotedKey provided', async () => {
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-      await connectChannel(channel);
-
-      await channel.sendMessage('registered@g.us', 'Plain message');
-
-      // Called with only 2 args (no quoted option)
-      const call = vi.mocked(fakeSocket.sendMessage).mock.calls[0];
-      expect(call[2]).toBeUndefined();
-    });
-
-    it('queues message with quotedKey when disconnected', async () => {
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-      // Do NOT connect — channel stays disconnected
-
-      await channel.sendMessage('registered@g.us', 'Queued reply', {
-        id: 'qid',
-        remoteJid: 'registered@g.us',
-        fromMe: false,
-      });
-
-      // Should not have called sock.sendMessage
-      expect(fakeSocket.sendMessage).not.toHaveBeenCalled();
     });
   });
 });

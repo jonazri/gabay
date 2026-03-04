@@ -2,6 +2,8 @@
 # Skills are applied sequentially at build time.
 # Order matters: each skill merges against the accumulated state.
 skills:
+  - whatsapp-types
+  - ipc-handler-registry
   - reactions
   - refresh-oauth
   - auth-recovery

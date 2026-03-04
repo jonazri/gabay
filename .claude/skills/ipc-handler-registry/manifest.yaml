@@ -1,0 +1,11 @@
+skill: ipc-handler-registry
+version: 1.0.0
+description: "IPC handler registry — skills register handlers instead of replacing ipc.ts"
+core_version: 0.1.0
+adds:
+  - src/ipc-handlers.ts
+  - src/ipc-handlers.test.ts
+modifies:
+  - src/ipc.ts
+depends: []
+test: "npx vitest run src/ipc-handlers.test.ts"

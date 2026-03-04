@@ -1,19 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
+  _getReactionsForMessage,
   _initTestDatabase,
   createTask,
   deleteTask,
   getAllChats,
+  getAllRegisteredGroups,
   getLatestMessage,
   getMessageFromMe,
-  getMessagesByReaction,
   getMessagesSince,
   getNewMessages,
-  getReactionsForMessage,
-  getReactionsByUser,
-  getReactionStats,
   getTaskById,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   storeReaction,
@@ -396,6 +395,40 @@ describe('task CRUD', () => {
   });
 });
 
+// --- RegisteredGroup isMain round-trip ---
+
+describe('registered group isMain', () => {
+  it('persists isMain=true through set/get round-trip', () => {
+    setRegisteredGroup('main@s.whatsapp.net', {
+      name: 'Main Chat',
+      folder: 'whatsapp_main',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      isMain: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['main@s.whatsapp.net'];
+    expect(group).toBeDefined();
+    expect(group.isMain).toBe(true);
+    expect(group.folder).toBe('whatsapp_main');
+  });
+
+  it('omits isMain for non-main groups', () => {
+    setRegisteredGroup('group@g.us', {
+      name: 'Family Chat',
+      folder: 'whatsapp_family-chat',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['group@g.us'];
+    expect(group).toBeDefined();
+    expect(group.isMain).toBeUndefined();
+  });
+});
+
 // --- getLatestMessage ---
 
 describe('getLatestMessage', () => {
@@ -493,7 +526,7 @@ describe('storeReaction', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const reactions = getReactionsForMessage('msg-1', 'group@g.us');
+    const reactions = _getReactionsForMessage('msg-1', 'group@g.us');
     expect(reactions).toHaveLength(1);
     expect(reactions[0].emoji).toBe('👍');
     expect(reactions[0].reactor_name).toBe('Alice');
@@ -514,7 +547,7 @@ describe('storeReaction', () => {
       timestamp: '2024-01-01T00:00:02.000Z',
     });
 
-    const reactions = getReactionsForMessage('msg-1', 'group@g.us');
+    const reactions = _getReactionsForMessage('msg-1', 'group@g.us');
     expect(reactions).toHaveLength(1);
     expect(reactions[0].emoji).toBe('❤️');
   });
@@ -535,181 +568,6 @@ describe('storeReaction', () => {
       timestamp: '2024-01-01T00:00:02.000Z',
     });
 
-    expect(getReactionsForMessage('msg-1', 'group@g.us')).toHaveLength(0);
-  });
-});
-
-// --- getReactionsForMessage ---
-
-describe('getReactionsForMessage', () => {
-  it('returns multiple reactions ordered by timestamp', () => {
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'b@s.whatsapp.net',
-      emoji: '❤️',
-      timestamp: '2024-01-01T00:00:02.000Z',
-    });
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'a@s.whatsapp.net',
-      emoji: '👍',
-      timestamp: '2024-01-01T00:00:01.000Z',
-    });
-
-    const reactions = getReactionsForMessage('msg-1', 'group@g.us');
-    expect(reactions).toHaveLength(2);
-    expect(reactions[0].reactor_jid).toBe('a@s.whatsapp.net');
-    expect(reactions[1].reactor_jid).toBe('b@s.whatsapp.net');
-  });
-
-  it('returns empty array for message with no reactions', () => {
-    expect(getReactionsForMessage('nonexistent', 'group@g.us')).toEqual([]);
-  });
-});
-
-// --- getMessagesByReaction ---
-
-describe('getMessagesByReaction', () => {
-  beforeEach(() => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
-    store({
-      id: 'msg-1',
-      chat_jid: 'group@g.us',
-      sender: 'author@s.whatsapp.net',
-      sender_name: 'Author',
-      content: 'bookmarked msg',
-      timestamp: '2024-01-01T00:00:01.000Z',
-    });
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net',
-      emoji: '📌',
-      timestamp: '2024-01-01T00:00:02.000Z',
-    });
-  });
-
-  it('joins reactions with messages', () => {
-    const results = getMessagesByReaction('user@s.whatsapp.net', '📌');
-    expect(results).toHaveLength(1);
-    expect(results[0].content).toBe('bookmarked msg');
-    expect(results[0].sender_name).toBe('Author');
-  });
-
-  it('filters by chatJid when provided', () => {
-    const results = getMessagesByReaction(
-      'user@s.whatsapp.net',
-      '📌',
-      'group@g.us',
-    );
-    expect(results).toHaveLength(1);
-
-    const empty = getMessagesByReaction(
-      'user@s.whatsapp.net',
-      '📌',
-      'other@g.us',
-    );
-    expect(empty).toHaveLength(0);
-  });
-
-  it('returns empty when no matching reactions', () => {
-    expect(getMessagesByReaction('user@s.whatsapp.net', '🔥')).toHaveLength(0);
-  });
-});
-
-// --- getReactionsByUser ---
-
-describe('getReactionsByUser', () => {
-  it('returns reactions for a user ordered by timestamp desc', () => {
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net',
-      emoji: '👍',
-      timestamp: '2024-01-01T00:00:01.000Z',
-    });
-    storeReaction({
-      message_id: 'msg-2',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'user@s.whatsapp.net',
-      emoji: '❤️',
-      timestamp: '2024-01-01T00:00:02.000Z',
-    });
-
-    const reactions = getReactionsByUser('user@s.whatsapp.net');
-    expect(reactions).toHaveLength(2);
-    expect(reactions[0].emoji).toBe('❤️'); // newer first
-    expect(reactions[1].emoji).toBe('👍');
-  });
-
-  it('respects the limit parameter', () => {
-    for (let i = 0; i < 5; i++) {
-      storeReaction({
-        message_id: `msg-${i}`,
-        message_chat_jid: 'group@g.us',
-        reactor_jid: 'user@s.whatsapp.net',
-        emoji: '👍',
-        timestamp: `2024-01-01T00:00:0${i}.000Z`,
-      });
-    }
-
-    expect(getReactionsByUser('user@s.whatsapp.net', 3)).toHaveLength(3);
-  });
-
-  it('returns empty for user with no reactions', () => {
-    expect(getReactionsByUser('nobody@s.whatsapp.net')).toEqual([]);
-  });
-});
-
-// --- getReactionStats ---
-
-describe('getReactionStats', () => {
-  beforeEach(() => {
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'a@s.whatsapp.net',
-      emoji: '👍',
-      timestamp: '2024-01-01T00:00:01.000Z',
-    });
-    storeReaction({
-      message_id: 'msg-2',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'b@s.whatsapp.net',
-      emoji: '👍',
-      timestamp: '2024-01-01T00:00:02.000Z',
-    });
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'group@g.us',
-      reactor_jid: 'c@s.whatsapp.net',
-      emoji: '❤️',
-      timestamp: '2024-01-01T00:00:03.000Z',
-    });
-    storeReaction({
-      message_id: 'msg-1',
-      message_chat_jid: 'other@g.us',
-      reactor_jid: 'a@s.whatsapp.net',
-      emoji: '🔥',
-      timestamp: '2024-01-01T00:00:04.000Z',
-    });
-  });
-
-  it('returns global stats ordered by count desc', () => {
-    const stats = getReactionStats();
-    expect(stats[0]).toEqual({ emoji: '👍', count: 2 });
-    expect(stats).toHaveLength(3);
-  });
-
-  it('filters by chatJid', () => {
-    const stats = getReactionStats('group@g.us');
-    expect(stats).toHaveLength(2);
-    expect(stats.find((s) => s.emoji === '🔥')).toBeUndefined();
-  });
-
-  it('returns empty for chat with no reactions', () => {
-    expect(getReactionStats('empty@g.us')).toEqual([]);
+    expect(_getReactionsForMessage('msg-1', 'group@g.us')).toHaveLength(0);
   });
 });

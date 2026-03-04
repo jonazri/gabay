@@ -39,6 +39,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
 export interface NewMessage {
@@ -50,17 +51,6 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  replied_to_id?: string;
-  replied_to_sender?: string;
-  replied_to_content?: string;
-}
-
-export interface QuotedMessageKey {
-  id: string;
-  remoteJid: string;
-  fromMe: boolean;
-  participant?: string; // Group sender of the quoted message
-  content?: string; // Text content for WhatsApp's preview
 }
 
 export interface ScheduledTask {
@@ -92,17 +82,24 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, quotedKey?: QuotedMessageKey): Promise<void>;
+  sendMessage(jid: string, text: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: sync group/chat names from the platform.
+  syncGroups?(force: boolean): Promise<void>;
   // Optional: reaction support
   sendReaction?(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
-    emoji: string
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
   ): Promise<void>;
   reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 }
@@ -112,7 +109,7 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
+// channels that sync names separately (via syncGroups) omit it.
 export type OnChatMetadata = (
   chatJid: string,
   timestamp: string,
