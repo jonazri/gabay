@@ -24,6 +24,7 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import sys
 import json
 import html.parser
+import time
 
 # ---------------------------------------------------------------------------
 # Resolve paths relative to the project root (parent of scripts/)
@@ -38,6 +39,7 @@ DEVICE_CONFIG_PATH = os.path.join(
 )
 
 ASSISTANT_API_ENDPOINT = "embeddedassistant.googleapis.com"
+REFRESH_BUFFER_S = 5 * 60  # 5 minutes — skip refresh if token has more remaining
 
 # ---------------------------------------------------------------------------
 # Lazy imports — fail loudly if dependencies are missing
@@ -99,7 +101,7 @@ def extract_text_from_html(html_str: str) -> str:
 # Credential management
 # ---------------------------------------------------------------------------
 def load_credentials() -> google.oauth2.credentials.Credentials:
-    """Load OAuth credentials from disk, refreshing if expired."""
+    """Load OAuth credentials from disk, refreshing only if expired or expiring soon."""
     if not os.path.isfile(CREDENTIALS_PATH):
         sys.stderr.write(f"Credentials not found: {CREDENTIALS_PATH}\n")
         sys.stderr.write("Run scripts/google-assistant-setup.py first.\n")
@@ -117,8 +119,16 @@ def load_credentials() -> google.oauth2.credentials.Credentials:
         scopes=cred_data.get("scopes"),
     )
 
-    # Always refresh on load — access tokens expire after 1 hour and we
-    # don't persist the expiry timestamp, so we can't tell if it's stale.
+    # Skip refresh if token is still fresh (>5 min remaining)
+    expires_at = cred_data.get("expires_at")
+    if expires_at and credentials.token:
+        remaining = expires_at / 1000 - time.time()  # expires_at is ms
+        if remaining > REFRESH_BUFFER_S:
+            sys.stderr.write(
+                f"Token still fresh ({remaining:.0f}s remaining), skipping refresh.\n"
+            )
+            return credentials
+
     if cred_data.get("refresh_token"):
         sys.stderr.write("Refreshing access token...\n")
         credentials.refresh(google.auth.transport.requests.Request())
@@ -133,6 +143,15 @@ def load_credentials() -> google.oauth2.credentials.Credentials:
 
 def _save_credentials(credentials: google.oauth2.credentials.Credentials):
     """Persist refreshed credentials back to disk (atomic write)."""
+    # Compute expires_at in epoch milliseconds (matches Node convention).
+    # Google tokens live 1 hour; credentials.expiry is set after refresh().
+    expires_at_ms = None
+    if credentials.expiry:
+        expires_at_ms = int(credentials.expiry.timestamp() * 1000)
+    else:
+        # Fallback: assume 1-hour lifetime from now
+        expires_at_ms = int((time.time() + 3600) * 1000)
+
     cred_data = {
         "token": credentials.token,
         "refresh_token": credentials.refresh_token,
@@ -140,6 +159,7 @@ def _save_credentials(credentials: google.oauth2.credentials.Credentials):
         "client_id": credentials.client_id,
         "client_secret": credentials.client_secret,
         "scopes": list(credentials.scopes) if credentials.scopes else [],
+        "expires_at": expires_at_ms,
     }
     import tempfile
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(CREDENTIALS_PATH))
@@ -184,9 +204,33 @@ class AssistantClient:
         sys.stderr.write("Connected.\n")
 
     def _ensure_fresh_credentials(self):
-        """Refresh credentials if expired, reconnect if needed."""
-        if self.credentials.expired:
-            sys.stderr.write("Token expired, refreshing...\n")
+        """Refresh credentials if expired or expiring within buffer, reconnect if needed."""
+        needs_refresh = self.credentials.expired
+        if not needs_refresh:
+            # Check persisted expires_at for proactive refresh
+            try:
+                with open(CREDENTIALS_PATH) as f:
+                    cred_data = json.load(f)
+                expires_at = cred_data.get("expires_at")
+                if expires_at:
+                    remaining = expires_at / 1000 - time.time()
+                    needs_refresh = remaining <= REFRESH_BUFFER_S
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        if needs_refresh:
+            # Re-check — Node scheduler may have refreshed while we were deciding
+            try:
+                with open(CREDENTIALS_PATH) as f:
+                    fresh_check = json.load(f)
+                if fresh_check.get("expires_at", 0) / 1000 - time.time() > REFRESH_BUFFER_S:
+                    sys.stderr.write("Token was refreshed externally, reloading from disk\n")
+                    self.credentials = load_credentials()
+                    self._connect()
+                    return
+            except (OSError, json.JSONDecodeError):
+                pass
+            sys.stderr.write("Token expired or expiring soon, refreshing...\n")
             self.credentials.refresh(google.auth.transport.requests.Request())
             _save_credentials(self.credentials)
             self._connect()
