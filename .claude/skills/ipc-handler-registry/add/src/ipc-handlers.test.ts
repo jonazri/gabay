@@ -1,15 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-
-// We'll import from the module under test once it exists
-// For now this file defines the expected behavior
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('IPC Handler Registry', () => {
-  // Need to reset module state between tests — use dynamic import
   let registerIpcHandler: typeof import('./ipc-handlers.js').registerIpcHandler;
   let getIpcHandler: typeof import('./ipc-handlers.js').getIpcHandler;
 
   beforeEach(async () => {
-    // Re-import to reset the handlers Map
+    vi.resetModules();
     const mod = await import('./ipc-handlers.js');
     registerIpcHandler = mod.registerIpcHandler;
     getIpcHandler = mod.getIpcHandler;
