@@ -19,7 +19,13 @@ import {
   OWNER_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
@@ -29,6 +35,7 @@ import {
   OnChatMetadata,
   RegisteredGroup,
 } from '../types.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 
 const VOICE_AUDIO_DIR = path.join(process.cwd(), 'data', 'voice-audio');
 
@@ -321,6 +328,46 @@ export class WhatsAppChannel implements Channel {
         }
       }
     });
+
+    // Listen for message reactions
+    this.sock.ev.on('messages.reaction', async (reactions) => {
+      for (const { key, reaction } of reactions) {
+        try {
+          const messageId = key.id;
+          if (!messageId) continue;
+          const rawChatJid = key.remoteJid;
+          if (!rawChatJid || rawChatJid === 'status@broadcast') continue;
+          const chatJid = await this.translateJid(rawChatJid);
+          const groups = this.opts.registeredGroups();
+          if (!groups[chatJid]) continue;
+          const reactorJid =
+            reaction.key?.participant || reaction.key?.remoteJid || '';
+          const emoji = reaction.text || '';
+          const timestamp = reaction.senderTimestampMs
+            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+            : new Date().toISOString();
+          storeReaction({
+            message_id: messageId,
+            message_chat_jid: chatJid,
+            reactor_jid: reactorJid,
+            reactor_name: reactorJid.split('@')[0],
+            emoji,
+            timestamp,
+          });
+          logger.info(
+            {
+              chatJid,
+              messageId: messageId.slice(0, 10) + '...',
+              reactor: reactorJid.split('@')[0],
+              emoji: emoji || '(removed)',
+            },
+            emoji ? 'Reaction added' : 'Reaction removed',
+          );
+        } catch (err) {
+          logger.error({ err }, 'Failed to process reaction');
+        }
+      }
+    });
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -351,6 +398,51 @@ export class WhatsAppChannel implements Channel {
         'Failed to send, message queued',
       );
     }
+  }
+
+  async sendReaction(
+    chatJid: string,
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
+  ): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
+      throw new Error('Not connected to WhatsApp');
+    }
+    try {
+      await this.sock.sendMessage(chatJid, {
+        react: { text: emoji, key: messageKey },
+      });
+      logger.info(
+        {
+          chatJid,
+          messageId: messageKey.id?.slice(0, 10) + '...',
+          emoji: emoji || '(removed)',
+        },
+        emoji ? 'Reaction sent' : 'Reaction removed',
+      );
+    } catch (err) {
+      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
+      throw err;
+    }
+  }
+
+  async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
+    const latest = getLatestMessage(chatJid);
+    if (!latest) {
+      throw new Error(`No messages found for chat ${chatJid}`);
+    }
+    const messageKey = {
+      id: latest.id,
+      remoteJid: chatJid,
+      fromMe: latest.fromMe,
+    };
+    await this.sendReaction(chatJid, messageKey, emoji);
   }
 
   isConnected(): boolean {
@@ -467,3 +559,5 @@ export class WhatsAppChannel implements Channel {
     }
   }
 }
+
+registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));

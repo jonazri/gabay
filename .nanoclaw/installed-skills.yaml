@@ -3,6 +3,7 @@
 # Order matters: each skill merges against the accumulated state.
 skills:
   - whatsapp-types
+  - whatsapp
   - ipc-handler-registry
   - reactions
   - refresh-oauth

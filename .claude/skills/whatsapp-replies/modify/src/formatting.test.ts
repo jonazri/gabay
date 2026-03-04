@@ -62,9 +62,26 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
       '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+        '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
+  });
+
+  it('includes message id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'msg-xyz' })]);
+    expect(result).toContain('id="msg-xyz"');
+  });
+
+  it('includes id attribute in reply branch', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'reply-123', replied_to_content: 'Original message' }),
+    ]);
+    expect(result).toContain('id="reply-123"');
+  });
+
+  it('escapes special characters in id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'id-"&"' })]);
+    expect(result).toContain('id="id-&quot;&amp;&quot;"');
   });
 
   it('formats multiple messages', () => {
@@ -101,6 +118,35 @@ describe('formatMessages', () => {
   it('handles empty array', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
+  });
+
+  it('includes reply context as nested XML when present', () => {
+    const msg = makeMsg({
+      replied_to_id: 'abc123',
+      replied_to_sender: 'Bob',
+      replied_to_content: 'Original message here',
+    });
+    const result = formatMessages([msg]);
+    expect(result).toContain('replied_to_id="abc123"');
+    expect(result).toContain('replied_to_sender="Bob"');
+    expect(result).toContain('<reply_to>Original message here</reply_to>');
+  });
+
+  it('omits reply attributes when not present', () => {
+    const result = formatMessages([makeMsg()]);
+    expect(result).not.toContain('replied_to_id');
+    expect(result).not.toContain('<reply_to>');
+  });
+
+  it('escapes special chars in reply context', () => {
+    const msg = makeMsg({
+      replied_to_id: 'x1',
+      replied_to_sender: 'A & B',
+      replied_to_content: '<script>xss</script>',
+    });
+    const result = formatMessages([msg]);
+    expect(result).toContain('replied_to_sender="A &amp; B"');
+    expect(result).toContain('&lt;script&gt;xss&lt;/script&gt;');
   });
 });
 

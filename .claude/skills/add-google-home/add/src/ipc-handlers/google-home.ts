@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { registerIpcHandler } from '../ipc-handlers.js';
+import { IpcHandler, registerIpcHandler } from '../ipc-handlers.js';
 import {
   sendGoogleAssistantCommand,
   resetGoogleAssistantConversation,
@@ -9,7 +9,7 @@ import {
 import { DATA_DIR } from '../config.js';
 import { logger } from '../logger.js';
 
-registerIpcHandler('google_assistant_command', async (data, _deps, context) => {
+const handler: IpcHandler = async (data, _deps, context) => {
   const requestId = data.requestId as string | undefined;
   const text = data.text as string | undefined;
 
@@ -70,4 +70,7 @@ registerIpcHandler('google_assistant_command', async (data, _deps, context) => {
       'Google Assistant command failed',
     );
   }
-});
+};
+
+registerIpcHandler('google_assistant_command', handler);
+registerIpcHandler('google_home_command', handler);

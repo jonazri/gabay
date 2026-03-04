@@ -9,6 +9,7 @@ import {
   getAllRegisteredGroups,
   getLatestMessage,
   getMessageFromMe,
+  getMessageById,
   getMessagesSince,
   getNewMessages,
   getTaskById,
@@ -569,5 +570,88 @@ describe('storeReaction', () => {
     });
 
     expect(_getReactionsForMessage('msg-1', 'group@g.us')).toHaveLength(0);
+  });
+});
+
+describe('reply context storage', () => {
+  it('stores and retrieves replied_to fields on a message', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 'reply-1',
+      chat_jid: 'group@g.us',
+      sender: 'alice@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'This is my reply',
+      timestamp: '2024-01-01T00:01:00.000Z',
+      replied_to_id: 'original-1',
+      replied_to_sender: 'Bob',
+      replied_to_content: 'Original message',
+    });
+
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Bot',
+    );
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].replied_to_id).toBe('original-1');
+    expect(msgs[0].replied_to_sender).toBe('Bob');
+    expect(msgs[0].replied_to_content).toBe('Original message');
+  });
+
+  it('returns undefined for replied_to fields when not set', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 'plain-1',
+      chat_jid: 'group@g.us',
+      sender: 'alice@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'No reply context',
+      timestamp: '2024-01-01T00:02:00.000Z',
+    });
+
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:01:30.000Z',
+      'Bot',
+    );
+    expect(msgs[0].replied_to_id == null).toBe(true);
+  });
+});
+
+describe('getMessageById', () => {
+  it('returns a message by id and chatJid', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 'lookup-1',
+      chat_jid: 'group@g.us',
+      sender: 'alice@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'Findable message',
+      timestamp: '2024-01-01T00:03:00.000Z',
+    });
+
+    const msg = getMessageById('lookup-1', 'group@g.us');
+    expect(msg).toBeDefined();
+    expect(msg!.id).toBe('lookup-1');
+    expect(msg!.content).toBe('Findable message');
+  });
+
+  it('returns undefined when id not found', () => {
+    expect(getMessageById('nonexistent', 'group@g.us')).toBeUndefined();
+  });
+
+  it('returns undefined when chatJid does not match', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 'lookup-2',
+      chat_jid: 'group@g.us',
+      sender: 'alice@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'Message',
+      timestamp: '2024-01-01T00:04:00.000Z',
+    });
+
+    expect(getMessageById('lookup-2', 'other@g.us')).toBeUndefined();
   });
 });

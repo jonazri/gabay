@@ -12,6 +12,8 @@ modifies:
   - src/db.test.ts
   - src/db.ts
   - src/formatting.test.ts
+  - src/index.ts
+  - src/ipc.ts
   - src/router.ts
   - src/types.ts
 modify_base:
@@ -22,6 +24,8 @@ modify_base:
   src/db.test.ts: _accumulated
   src/db.ts: _accumulated
   src/formatting.test.ts: _accumulated
+  src/index.ts: _accumulated
+  src/ipc.ts: _accumulated
   src/router.ts: _accumulated
   src/types.ts: _accumulated
 conflicts: []

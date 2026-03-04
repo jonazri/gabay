@@ -41,6 +41,9 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      replied_to_id TEXT,
+      replied_to_sender TEXT,
+      replied_to_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -127,6 +130,15 @@ function createSchema(database: Database.Database): void {
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
+  }
+
+  // Add reply context columns if they don't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_id TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_sender TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_content TEXT`);
+  } catch {
+    /* columns already exist */
   }
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
@@ -285,7 +297,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -295,6 +307,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.replied_to_id ?? null,
+    msg.replied_to_sender ?? null,
+    msg.replied_to_content ?? null,
   );
 }
 
@@ -336,7 +351,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, replied_to_id, replied_to_sender, replied_to_content
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -364,7 +379,7 @@ export function getMessagesSince(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, replied_to_id, replied_to_sender, replied_to_content
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -374,6 +389,17 @@ export function getMessagesSince(
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+export function getMessageById(
+  id: string,
+  chatJid: string,
+): NewMessage | undefined {
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content FROM messages WHERE id = ? AND chat_jid = ?`,
+    )
+    .get(id, chatJid) as NewMessage | undefined;
 }
 
 export function getMessageFromMe(messageId: string, chatJid: string): boolean {

@@ -18,6 +18,8 @@ modifies:
   - src/channels/whatsapp.test.ts
   - src/group-queue.test.ts
   - src/ipc-auth.test.ts
+modify_base:
+  src/ipc.ts: ipc-handler-registry
 conflicts: []
 depends: []
 test: "npx tsc --noEmit"

@@ -50,6 +50,14 @@ server.tool(
       .describe(
         'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
       ),
+    quoted_message_id: z
+      .string()
+      .optional()
+      .describe(
+        'ID of the message to reply to. Threads your response as a WhatsApp reply. ' +
+          'Use in group chats to keep conversations readable. ' +
+          'In private owner chat, use only when disambiguating multiple queued messages.',
+      ),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -57,6 +65,7 @@ server.tool(
       chatJid,
       text: args.text,
       sender: args.sender || undefined,
+      quotedMessageId: args.quoted_message_id || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
@@ -64,6 +73,40 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z
+      .string()
+      .describe(
+        'The emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\udd25")',
+      ),
+    message_id: z
+      .string()
+      .optional()
+      .describe(
+        'The message ID to react to. If omitted, reacts to the latest message in the chat.',
+      ),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return {
+      content: [
+        { type: 'text' as const, text: `Reaction ${args.emoji} sent.` },
+      ],
+    };
   },
 );
 
@@ -349,20 +392,18 @@ server.tool(
 
 server.tool(
   'register_group',
-  `Register a new chat/group so the agent can respond to messages there. Main group only.
+  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
   {
     jid: z
       .string()
-      .describe(
-        'The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")',
-      ),
+      .describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
     name: z.string().describe('Display name for the group'),
     folder: z
       .string()
       .describe(
-        'Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")',
+        'Folder name for group files (lowercase, hyphens, e.g., "family-chat")',
       ),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },

@@ -5,14 +5,25 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getMessageById,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { isShabbatOrYomTov } from './shabbat.js';
+import { QuotedMessageKey, RegisteredGroup } from './types.js';
 import { getIpcHandler } from './ipc-handlers.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    quotedKey?: QuotedMessageKey,
+  ) => Promise<void>;
   sendReaction?: (
     jid: string,
     emoji: string,
@@ -48,6 +59,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
   let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
+    if (isShabbatOrYomTov()) {
+      logger.debug('Shabbat/Yom Tov active, skipping IPC processing');
+      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+      return;
+    }
+
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -91,7 +108,39 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  let quotedKey: QuotedMessageKey | undefined;
+                  if (data.quotedMessageId) {
+                    const quotedMsg = getMessageById(
+                      data.quotedMessageId,
+                      data.chatJid,
+                    );
+                    if (quotedMsg) {
+                      // On shared numbers, is_from_me=1 for ALL messages.
+                      // Baileys-sent messages have IDs starting with "3EB0";
+                      // phone-sent messages start with "3B". WhatsApp needs
+                      // fromMe=true only for Baileys-sent messages.
+                      const isBaileySent = quotedMsg.id.startsWith('3EB0');
+                      quotedKey = {
+                        id: quotedMsg.id,
+                        remoteJid: quotedMsg.chat_jid,
+                        fromMe: isBaileySent,
+                        participant:
+                          quotedMsg.sender !== quotedMsg.chat_jid
+                            ? quotedMsg.sender
+                            : undefined,
+                        content: quotedMsg.content,
+                      };
+                    } else {
+                      logger.warn(
+                        {
+                          chatJid: data.chatJid,
+                          quotedMessageId: data.quotedMessageId,
+                        },
+                        'Quoted message not found, sending as plain message',
+                      );
+                    }
+                  }
+                  await deps.sendMessage(data.chatJid, data.text, quotedKey);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',

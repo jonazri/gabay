@@ -12,6 +12,8 @@ structured:
     "@elevenlabs/elevenlabs-js": "^2.36.0"
   env_additions:
     - ELEVENLABS_API_KEY
+modify_base:
+  src/channels/whatsapp.ts: _accumulated
 conflicts:
   - voice-transcription
 depends: []
