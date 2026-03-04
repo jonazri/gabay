@@ -25,7 +25,6 @@ import './ipc-handlers/refresh-oauth.js';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
-  MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -209,7 +208,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -355,7 +354,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
 function notifyMainGroup(text: string): void {
   const mainJid = Object.entries(registeredGroups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+    ([_, g]) => g.isMain === true,
   )?.[0];
   if (!mainJid) return;
   const channel = findChannel(channels, mainJid);
@@ -368,7 +367,7 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -488,7 +487,7 @@ async function sendPostShabbatSummary(): Promise<string[]> {
   const pendingJids: string[] = [];
 
   const userJid = Object.entries(registeredGroups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+    ([_, g]) => g.isMain === true,
   )?.[0];
   if (!userJid) return pendingJids;
 
@@ -581,7 +580,7 @@ async function startMessageLoop(): Promise<void> {
               continue;
             }
 
-            const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+            const isMainGroup = group.isMain === true;
             const needsTrigger =
               !isMainGroup && group.requiresTrigger !== false;
 
@@ -767,7 +766,7 @@ async function main(): Promise<void> {
     },
     isMainGroup: (chatJid) => {
       const group = registeredGroups[chatJid];
-      return group?.folder === MAIN_GROUP_FOLDER;
+      return group?.isMain === true;
     },
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
@@ -821,8 +820,13 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     registerGroup,
     unregisterGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroups: async (force: boolean) => {
+      await Promise.all(
+        channels
+          .filter((ch) => ch.syncGroups)
+          .map((ch) => ch.syncGroups!(force)),
+      );
+    },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
@@ -835,7 +839,7 @@ async function main(): Promise<void> {
 
   // Candle lighting reminders (erev Shabbat and erev Yom Tov)
   const userJid = Object.entries(registeredGroups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+    ([_, g]) => g.isMain === true,
   )?.[0];
   if (userJid) {
     startCandleLightingNotifier((text) => whatsapp.sendMessage(userJid, text));

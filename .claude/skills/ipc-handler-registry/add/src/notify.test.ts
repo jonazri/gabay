@@ -31,15 +31,4 @@ describe('notifyMainGroup', () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
   });
-
-  it('uses explicit mainGroupFolder override when provided', async () => {
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
-    const registeredGroups = {
-      'main-jid@g.us': { name: 'Main', folder: 'main' },
-    };
-
-    await notifyMainGroup(registeredGroups as any, sendMessage, 'test', 'main');
-
-    expect(sendMessage).toHaveBeenCalledWith('main-jid@g.us', 'test');
-  });
 });

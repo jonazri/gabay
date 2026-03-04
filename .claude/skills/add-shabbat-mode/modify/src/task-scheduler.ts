@@ -2,12 +2,7 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import {
-  ASSISTANT_NAME,
-  MAIN_GROUP_FOLDER,
-  SCHEDULER_POLL_INTERVAL,
-  TIMEZONE,
-} from './config.js';
+import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -66,7 +61,7 @@ async function notifyMain(
 ): Promise<void> {
   const groups = deps.registeredGroups();
   const mainJid = Object.entries(groups).find(
-    ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+    ([_, g]) => g.isMain === true,
   )?.[0];
   if (mainJid) {
     await deps.sendMessage(mainJid, text);
@@ -128,7 +123,7 @@ async function runTask(
   }
 
   // Update tasks snapshot for container to read (filtered by group)
-  const isMain = task.group_folder === MAIN_GROUP_FOLDER;
+  const isMain = group.isMain === true;
   const tasks = getAllTasks();
   writeTasksSnapshot(
     task.group_folder,
@@ -323,7 +318,10 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 
       if (isShabbatOrYomTov()) {
         if (dueTasks.length > 0) {
-          logger.debug({ count: dueTasks.length }, 'Shabbat/Yom Tov active, skipping due tasks');
+          logger.debug(
+            { count: dueTasks.length },
+            'Shabbat/Yom Tov active, skipping due tasks',
+          );
         }
         setTimeout(loop, SCHEDULER_POLL_INTERVAL);
         return;
