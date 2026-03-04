@@ -10,11 +10,6 @@ Prevent duplicate task execution and improve task result routing safety.
 - Returns ISO string for cron and interval tasks, null for one-shot tasks
 - Used in both `runTask()` (post-run update) and `startSchedulerLoop()` (pre-advance)
 
-### notifyMain() helper (new, after SchedulerDependencies)
-- Sends a message to the main group JID
-- Looks up mainJid by finding the group whose folder matches MAIN_GROUP_FOLDER
-- Utility for system notifications (currently unused in this skill but provides the hook)
-
 ### runTask() stream callback
 - Added: guard that blocks sending scheduled task results to group chats (`@g.us`)
 - If `task.chat_jid` ends with `@g.us`, logs an error and returns without sending

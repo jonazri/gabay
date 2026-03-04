@@ -10,11 +10,18 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup } from './types.js';
+import { getIpcHandler } from './ipc-handlers.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendReaction?: (
+    jid: string,
+    emoji: string,
+    messageId?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  unregisterGroup?: (jid: string) => boolean;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -23,9 +30,12 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  statusHeartbeat?: () => void;
+  recoverPendingMessages?: () => void;
 }
 
 let ipcWatcherRunning = false;
+const RECOVERY_INTERVAL_MS = 60_000;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -36,6 +46,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
+  let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
     if (isShabbatOrYomTov()) {
@@ -98,6 +109,44 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                data.emoji &&
+                deps.sendReaction
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  try {
+                    await deps.sendReaction(
+                      data.chatJid,
+                      data.emoji,
+                      data.messageId,
+                    );
+                    logger.info(
+                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+                      'IPC reaction sent',
+                    );
+                  } catch (err) {
+                    logger.error(
+                      {
+                        chatJid: data.chatJid,
+                        emoji: data.emoji,
+                        sourceGroup,
+                        err,
+                      },
+                      'IPC reaction failed',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC reaction attempt blocked',
+                  );
+                }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
@@ -151,6 +200,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
+    }
+
+    // Status emoji heartbeat — detect dead containers with stale emoji state
+    deps.statusHeartbeat?.();
+
+    // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
+    const now = Date.now();
+    if (now - lastRecoveryTime >= RECOVERY_INTERVAL_MS) {
+      lastRecoveryTime = now;
+      deps.recoverPendingMessages?.();
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -390,7 +449,13 @@ export async function processTaskIpc(
       }
       break;
 
-    default:
-      logger.warn({ type: data.type }, 'Unknown IPC task type');
+    default: {
+      const handler = getIpcHandler(data.type);
+      if (handler) {
+        await handler(data, deps, { sourceGroup, isMain });
+      } else {
+        logger.warn({ type: data.type }, 'Unknown IPC task type');
+      }
+    }
   }
 }

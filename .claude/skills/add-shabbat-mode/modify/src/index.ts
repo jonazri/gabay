@@ -28,7 +28,11 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import './channels/index.js';
+import {
+  getChannelFactory,
+  getRegisteredChannelNames,
+} from './channels/registry.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -93,7 +97,6 @@ let lastAgentTimestamp: Record<string, string> = {};
 let cursorBeforePipe: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 let statusTracker: StatusTracker;
@@ -771,10 +774,26 @@ async function main(): Promise<void> {
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Create and connect all registered channels.
+  // Each channel self-registers via the barrel import above.
+  // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  for (const channelName of getRegisteredChannelNames()) {
+    const factory = getChannelFactory(channelName)!;
+    const channel = factory(channelOpts);
+    if (!channel) {
+      logger.warn(
+        { channel: channelName },
+        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
+      );
+      continue;
+    }
+    channels.push(channel);
+    await channel.connect();
+  }
+  if (channels.length === 0) {
+    logger.fatal('No channels connected');
+    process.exit(1);
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -842,7 +861,10 @@ async function main(): Promise<void> {
     ([_, g]) => g.isMain === true,
   )?.[0];
   if (userJid) {
-    startCandleLightingNotifier((text) => whatsapp.sendMessage(userJid, text));
+    startCandleLightingNotifier((text) => {
+      const channel = findChannel(channels, userJid);
+      if (channel) channel.sendMessage(userJid, text);
+    });
   } else {
     logger.warn('No main group registered — candle lighting notifier disabled');
   }
