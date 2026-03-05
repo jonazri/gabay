@@ -18,7 +18,10 @@ import { readState, writeState } from '../skills-engine/state.js';
 import { readManifest } from '../skills-engine/manifest.js';
 import { findSkillDir } from '../skills-engine/replay.js';
 import { BASE_DIR } from '../skills-engine/constants.js';
-import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
+import {
+  loadPathRemap,
+  resolvePathRemap,
+} from '../skills-engine/path-remap.js';
 
 const projectRoot = process.cwd();
 const force = process.argv.includes('--force');
@@ -45,10 +48,10 @@ if (!force) {
       stdio: 'pipe',
     });
   } catch {
+    console.error('Error: Uncommitted changes detected in src/ or container/.');
     console.error(
-      'Error: Uncommitted changes detected in src/ or container/.',
+      'Commit or stash your changes first, or use --force to override.',
     );
-    console.error('Commit or stash your changes first, or use --force to override.');
     process.exit(1);
   }
 }
@@ -181,31 +184,9 @@ if (fs.existsSync(baseEnvPath)) {
       const baseEnv = fs.readFileSync(baseEnvPath);
       const currentEnv = fs.readFileSync(currentEnvPath);
       if (!baseEnv.equals(currentEnv)) {
-        // Check for uncommitted changes before overwriting
-        let hasUncommittedEnvChanges = false;
-        try {
-          const status = execSync('git status --porcelain .env.example', {
-            cwd: projectRoot,
-            stdio: ['ignore', 'pipe', 'ignore'],
-          })
-            .toString()
-            .trim();
-          hasUncommittedEnvChanges = status.length > 0;
-        } catch {
-          // Not a git repo or git unavailable — fall back to overwriting
-          hasUncommittedEnvChanges = false;
-        }
-
-        if (hasUncommittedEnvChanges && !force) {
-          errors.push(
-            'Skipped restoring .env.example: it has uncommitted local changes. ' +
-              'Re-run with --force to overwrite.',
-          );
-        } else {
-          fs.copyFileSync(baseEnvPath, currentEnvPath);
-          if (!restored.includes('.env.example')) {
-            restored.push('.env.example');
-          }
+        fs.copyFileSync(baseEnvPath, currentEnvPath);
+        if (!restored.includes('.env.example')) {
+          restored.push('.env.example');
         }
       }
     }
