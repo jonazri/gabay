@@ -23,6 +23,7 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  deleteRegisteredGroup,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -30,7 +31,6 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
-  deleteRegisteredGroup,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
