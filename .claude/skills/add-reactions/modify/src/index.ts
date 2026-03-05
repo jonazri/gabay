@@ -45,9 +45,9 @@ import {
 import {
   getAllChats,
   getAllRegisteredGroups,
+  getMessageFromMe,
   getAllSessions,
   getAllTasks,
-  getMessageFromMe,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -63,8 +63,8 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { StatusTracker } from './status-tracker.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -79,9 +79,9 @@ let lastAgentTimestamp: Record<string, string> = {};
 let cursorBeforePipe: Record<string, string> = {};
 let messageLoopRunning = false;
 
+let statusTracker: StatusTracker;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-let statusTracker: StatusTracker;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -454,8 +454,12 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+            const allowlistCfg = loadSenderAllowlist();
+            const hasTrigger = groupMessages.some(
+              (m) =>
+                TRIGGER_PATTERN.test(m.content.trim()) &&
+                (m.is_from_me ||
+                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;
           }
@@ -479,10 +483,6 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
             // Mark new user messages as thinking (only groupMessages were markReceived'd;
             // accumulated allPending context messages are untracked and would no-op)
             for (const msg of groupMessages) {
@@ -494,6 +494,10 @@ async function startMessageLoop(): Promise<void> {
             if (!cursorBeforePipe[chatJid]) {
               cursorBeforePipe[chatJid] = lastAgentTimestamp[chatJid] || '';
             }
+            logger.debug(
+              { chatJid, count: messagesToSend.length },
+              'Piped messages to active container',
+            );
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
@@ -598,25 +602,6 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
-  statusTracker = new StatusTracker({
-    sendReaction: async (chatJid, messageKey, emoji) => {
-      const channel = findChannel(channels, chatJid);
-      if (!channel?.sendReaction) return;
-      await channel.sendReaction(chatJid, messageKey, emoji);
-    },
-    sendMessage: async (chatJid, text) => {
-      const channel = findChannel(channels, chatJid);
-      if (!channel) return;
-      await channel.sendMessage(chatJid, text);
-    },
-    isMainGroup: (chatJid) => {
-      const group = registeredGroups[chatJid];
-      return group?.isMain === true;
-    },
-    isContainerAlive: (chatJid) => queue.isActive(chatJid),
-  });
-
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
@@ -637,6 +622,25 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => {
+      const group = registeredGroups[chatJid];
+      return group?.isMain === true;
+    },
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -661,6 +665,8 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    registeredGroups: () => registeredGroups,
+    registerGroup,
     sendReaction: async (jid, emoji, messageId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
@@ -679,8 +685,6 @@ async function main(): Promise<void> {
         await channel.reactToLatestMessage(jid, emoji);
       }
     },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels

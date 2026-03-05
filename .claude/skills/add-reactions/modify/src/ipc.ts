@@ -9,7 +9,6 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
-import { getIpcHandler } from './ipc-handlers.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -33,8 +32,8 @@ export interface IpcDeps {
   recoverPendingMessages?: () => void;
 }
 
-let ipcWatcherRunning = false;
 const RECOVERY_INTERVAL_MS = 60_000;
+let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -45,6 +44,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
+
   let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
@@ -442,13 +442,7 @@ export async function processTaskIpc(
       }
       break;
 
-    default: {
-      const handler = getIpcHandler(data.type);
-      if (handler) {
-        await handler(data, deps, { sourceGroup, isMain });
-      } else {
-        logger.warn({ type: data.type }, 'Unknown IPC task type');
-      }
-    }
+    default:
+      logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
 }
