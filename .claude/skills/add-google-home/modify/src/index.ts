@@ -474,10 +474,10 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    stopGoogleTokenScheduler();
     await queue.shutdown(10000);
-    shutdownGoogleAssistant();
+    stopGoogleTokenScheduler();
     for (const ch of channels) await ch.disconnect();
+    shutdownGoogleAssistant();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -571,9 +571,9 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
+  startGoogleTokenScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startGoogleTokenScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

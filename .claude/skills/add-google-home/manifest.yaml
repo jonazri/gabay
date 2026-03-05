@@ -14,10 +14,8 @@ modifies:
   - src/index.ts
   - src/container-runner.ts
   - container/Dockerfile
-modify_base:
-  src/index.ts: _accumulated
 conflicts: []
 incompatible_with: []
-depends: [ipc-handler-registry]
+depends: [ipc-handler-registry, lifecycle-hooks]
 tested_with: []
 test: "npx tsc --noEmit"
