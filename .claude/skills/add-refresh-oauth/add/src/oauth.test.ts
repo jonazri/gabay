@@ -75,11 +75,21 @@ describe('getPrimaryToken', () => {
   });
 
   it('falls back to .env file when process.env is empty', () => {
-    // getPrimaryToken reads .env file as fallback; the project .env has a token
-    const token = getPrimaryToken();
-    // Should return something (from .env) rather than null
-    expect(token).toBeTruthy();
-    expect(typeof token).toBe('string');
+    const envPath = path.join(process.cwd(), '.env');
+    const hadEnv = fs.existsSync(envPath);
+    const originalContent = hadEnv ? fs.readFileSync(envPath, 'utf-8') : null;
+    // Write a known token so the test works in CI (no pre-existing .env)
+    fs.writeFileSync(envPath, 'CLAUDE_CODE_OAUTH_TOKEN=sk-dotenv-test\n');
+    try {
+      const token = getPrimaryToken();
+      expect(token).toBe('sk-dotenv-test');
+    } finally {
+      if (originalContent != null) {
+        fs.writeFileSync(envPath, originalContent);
+      } else {
+        fs.unlinkSync(envPath);
+      }
+    }
   });
 });
 
