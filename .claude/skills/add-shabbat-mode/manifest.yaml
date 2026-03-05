@@ -19,6 +19,7 @@ modify_base:
   src/task-scheduler.ts: _accumulated
 conflicts: []
 depends:
+  - lifecycle-hooks
   - reactions
   - refresh-oauth
   - group-lifecycle

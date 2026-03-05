@@ -1,6 +1,6 @@
 skill: reactions
 version: 1.0.0
-description: "WhatsApp emoji reaction support with status tracking"
+description: "WhatsApp emoji reaction support with status tracking. Removes sender-allowlist filtering from index.ts (trigger checks and onMessage drop mode)."
 core_version: 0.1.0
 adds:
   - container/skills/reactions/SKILL.md

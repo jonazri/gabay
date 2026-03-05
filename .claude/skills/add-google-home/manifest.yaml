@@ -18,6 +18,6 @@ modify_base:
   src/index.ts: group-lifecycle
 conflicts: []
 incompatible_with: []
-depends: [ipc-handler-registry, lifecycle-hooks, group-lifecycle]
+depends: [ipc-handler-registry, lifecycle-hooks, reactions, refresh-oauth, group-lifecycle]
 tested_with: []
 test: "npx tsc --noEmit"
