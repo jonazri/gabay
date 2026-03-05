@@ -14,6 +14,7 @@ structured:
     - ELEVENLABS_API_KEY
 modify_base:
   src/channels/whatsapp.ts: _accumulated
+  src/channels/whatsapp.test.ts: reactions
 conflicts:
   - voice-transcription
 depends: []
