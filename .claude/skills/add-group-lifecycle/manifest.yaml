@@ -7,6 +7,8 @@ adds:
 modifies:
   - src/db.ts
   - src/index.ts
+modify_base:
+  src/index.ts: reactions
 conflicts: []
 depends:
   - ipc-handler-registry

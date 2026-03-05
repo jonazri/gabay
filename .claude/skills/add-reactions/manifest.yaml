@@ -19,6 +19,8 @@ modifies:
   - src/channels/whatsapp.test.ts
   - src/group-queue.test.ts
   - src/ipc-auth.test.ts
+modify_base:
+  src/index.ts: lifecycle-hooks
 conflicts: []
-depends: []
+depends: [lifecycle-hooks]
 test: "npx tsc --noEmit"

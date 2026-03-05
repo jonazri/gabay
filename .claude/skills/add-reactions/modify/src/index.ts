@@ -66,6 +66,20 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { StatusTracker } from './status-tracker.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import {
+  runChannelsReadyHooks,
+  runShutdownHooks,
+  runStartupHooks,
+  shouldProcessMessages,
+  runGuardLiftedHooks,
+} from './lifecycle.js';
+import {
+  emitAgentStarting,
+  emitAgentOutput,
+  emitAgentSuccess,
+  emitAgentError,
+  emitMessagePiped,
+} from './message-events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -176,6 +190,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  if (!shouldProcessMessages()) return true;
+
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
@@ -238,12 +254,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     statusTracker.markThinking(msg.id);
   }
 
+  await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
   let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
       if (!firstOutputSeen) {
@@ -269,10 +287,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       statusTracker.markAllDone(chatJid);
+      await emitAgentSuccess(chatJid);
       queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
+      await emitAgentError(chatJid, result.error || null);
       hadError = true;
     }
   });
@@ -410,7 +430,20 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  let wasGuarded = !shouldProcessMessages();
+
   while (true) {
+    // Lifecycle guard: skip processing when guards are active (e.g. Shabbat mode)
+    if (!shouldProcessMessages()) {
+      wasGuarded = true;
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+      continue;
+    }
+    if (wasGuarded) {
+      await runGuardLiftedHooks();
+      wasGuarded = false;
+    }
+
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
@@ -454,12 +487,8 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+            const hasTrigger = groupMessages.some((m) =>
+              TRIGGER_PATTERN.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
           }
@@ -494,6 +523,7 @@ async function startMessageLoop(): Promise<void> {
             if (!cursorBeforePipe[chatJid]) {
               cursorBeforePipe[chatJid] = lastAgentTimestamp[chatJid] || '';
             }
+            await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -526,9 +556,6 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   // Roll back any piped-message cursors that were persisted before a crash.
-  // This ensures messages piped to a now-dead container are re-fetched.
-  // IMPORTANT: Only roll back if the container is no longer running — rolling
-  // back while the container is alive causes duplicate processing.
   let rolledBack = false;
   for (const [chatJid, savedCursor] of Object.entries(cursorBeforePipe)) {
     if (queue.isActive(chatJid)) {
@@ -573,6 +600,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  await runStartupHooks();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
@@ -584,6 +612,7 @@ async function main(): Promise<void> {
     // reaction sends use Promise.allSettled so disconnected-channel failures are
     // swallowed — minor degradation only during shutdown.
     await statusTracker.shutdown();
+    await runShutdownHooks();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -618,11 +647,6 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
-  if (channels.length === 0) {
-    logger.fatal('No channels connected');
-    process.exit(1);
-  }
-
   // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
   statusTracker = new StatusTracker({
     sendReaction: async (chatJid, messageKey, emoji) => {
@@ -641,6 +665,12 @@ async function main(): Promise<void> {
     },
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
+
+  await runChannelsReadyHooks(channels);
+  if (channels.length === 0) {
+    logger.fatal('No channels connected');
+    process.exit(1);
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
