@@ -216,12 +216,18 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
+  const keys = [
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
-  ]);
+  ];
+  const secrets = readEnvFile(keys);
+  // process.env takes precedence (e.g. bashrc token under systemd)
+  for (const key of keys) {
+    if (process.env[key]) secrets[key] = process.env[key]!;
+  }
+  return secrets;
 }
 
 function buildContainerArgs(

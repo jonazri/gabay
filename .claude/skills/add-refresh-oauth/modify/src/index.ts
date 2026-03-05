@@ -3,10 +3,13 @@ import path from 'path';
 
 import './ipc-handlers/refresh-oauth.js';
 import {
-  AUTH_ERROR_PATTERN,
+  attemptAuthRecovery,
   ensureTokenFresh,
-  refreshOAuthToken,
+  initOAuthState,
+  readOAuthState,
+  startPrimaryProbe,
   startTokenRefreshScheduler,
+  stopPrimaryProbe,
   stopTokenRefreshScheduler,
 } from './oauth.js';
 import {
@@ -342,43 +345,34 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
-      if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
-        logger.warn(
-          { group: group.name },
-          'Auth error detected, refreshing token and retrying',
+      if (
+        output.error &&
+        (await attemptAuthRecovery(output.error, (msg) => notifyMainGroup(msg)))
+      ) {
+        const retry = await runContainerAgent(
+          group,
+          {
+            prompt,
+            sessionId,
+            groupFolder: group.folder,
+            chatJid,
+            isMain,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            queue.registerProcess(chatJid, proc, containerName, group.folder),
+          wrappedOnOutput,
         );
-        notifyMainGroup(
-          '[system] Auth token expired — refreshing and retrying.',
-        );
-        const refreshed = await refreshOAuthToken();
-        if (refreshed) {
-          const retry = await runContainerAgent(
-            group,
-            { prompt, sessionId, groupFolder: group.folder, chatJid, isMain },
-            (proc, containerName) =>
-              queue.registerProcess(chatJid, proc, containerName, group.folder),
-            wrappedOnOutput,
-          );
-          if (retry.newSessionId) {
-            sessions[group.folder] = retry.newSessionId;
-            setSession(group.folder, retry.newSessionId);
-          }
-          if (retry.status === 'error') {
-            logger.error(
-              { group: group.name, error: retry.error },
-              'Container agent error after token refresh',
-            );
-            notifyMainGroup(
-              '[system] Token refresh failed. You may need to run "claude login".',
-            );
-            return 'error';
-          }
-          notifyMainGroup('[system] Token refreshed. Services restored.');
-          return 'success';
+        if (retry.newSessionId) {
+          sessions[group.folder] = retry.newSessionId;
+          setSession(group.folder, retry.newSessionId);
         }
-        notifyMainGroup(
-          '[system] Token refresh failed. You may need to run "claude login".',
+        if (retry.status === 'success') return 'success';
+        logger.error(
+          { group: group.name, error: retry.error },
+          'Container agent error after token refresh',
         );
+        return 'error';
       }
       logger.error(
         { group: group.name, error: output.error },
@@ -531,6 +525,7 @@ async function main(): Promise<void> {
     // compatibility (google-home uses the gap after queue.shutdown). Functionally
     // equivalent — clearing a setInterval is order-independent.
     stopTokenRefreshScheduler();
+    stopPrimaryProbe();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -590,11 +585,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Ensure token is fresh at startup so the first container doesn't hit an expired token
+  // Initialize OAuth state machine and ensure token is fresh
+  initOAuthState();
   await ensureTokenFresh();
 
-  // Schedule proactive token refresh
-  startTokenRefreshScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
+  // In fallback mode, start proactive refresh and primary token probe
+  if (readOAuthState().usingFallback) {
+    const oauthAlert = (msg: string) => notifyMainGroup(`[system] ${msg}`);
+    startTokenRefreshScheduler(oauthAlert);
+    startPrimaryProbe(oauthAlert);
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

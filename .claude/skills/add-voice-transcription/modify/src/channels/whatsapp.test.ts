@@ -23,14 +23,19 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
+  getLatestMessage: vi.fn(() => undefined),
+  getMessageFromMe: vi.fn(() => false),
   setLastGroupSync: vi.fn(),
+  storeReaction: vi.fn(),
   updateChatName: vi.fn(),
 }));
 
 // Mock transcription
 vi.mock('../transcription.js', () => ({
   isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
-  transcribeAudioMessage: vi.fn().mockResolvedValue('Hello this is a voice message'),
+  transcribeAudioMessage: vi
+    .fn()
+    .mockResolvedValue('Hello this is a voice message'),
 }));
 
 import { transcribeAudioMessage } from '../transcription.js';
@@ -567,7 +572,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledTimes(1);
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: '[Voice: Hello this is a voice message]' }),
+        expect.objectContaining({
+          content: '[Voice: Hello this is a voice message]',
+        }),
       );
     });
 
@@ -598,12 +605,16 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledTimes(1);
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: '[Voice Message - transcription unavailable]' }),
+        expect.objectContaining({
+          content: '[Voice Message - transcription unavailable]',
+        }),
       );
     });
 
     it('falls back when transcription throws', async () => {
-      vi.mocked(transcribeAudioMessage).mockRejectedValueOnce(new Error('API error'));
+      vi.mocked(transcribeAudioMessage).mockRejectedValueOnce(
+        new Error('API error'),
+      );
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -629,7 +640,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledTimes(1);
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: '[Voice Message - transcription failed]' }),
+        expect.objectContaining({
+          content: '[Voice Message - transcription failed]',
+        }),
       );
     });
 
