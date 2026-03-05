@@ -121,6 +121,38 @@ function syncRefreshedToken(): void {
   }
 }
 
+// --- Auth error recovery ---
+
+/**
+ * Detect an auth error and attempt token recovery.
+ * Returns true if the token was successfully refreshed (caller should retry).
+ * Returns false if the error is not auth-related or refresh failed.
+ */
+export async function attemptAuthRecovery(
+  error: string,
+  notify: (msg: string) => void | Promise<void>,
+): Promise<boolean> {
+  if (!AUTH_ERROR_PATTERN.test(error)) return false;
+
+  logger.warn('Auth error detected, attempting token recovery');
+  await notify('[system] Auth token expired — refreshing and retrying.');
+
+  const state = readOAuthState();
+  const refreshed = state.usingFallback
+    ? await refreshOAuthToken()
+    : await activateFallback((msg) => notify(`[system] ${msg}`));
+
+  if (refreshed) {
+    syncRefreshedToken();
+    await notify('[system] Token refreshed. Services restored.');
+  } else {
+    await notify(
+      '[system] Token refresh failed. You may need to run "claude login".',
+    );
+  }
+  return refreshed;
+}
+
 // --- Fallback activation ---
 
 /**

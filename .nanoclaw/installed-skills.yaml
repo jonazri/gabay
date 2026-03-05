@@ -7,7 +7,6 @@ skills:
   - ipc-handler-registry
   - reactions
   - refresh-oauth
-  - auth-recovery
   - group-lifecycle
   - google-home
   - shabbat-mode

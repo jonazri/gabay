@@ -1,6 +1,6 @@
 skill: refresh-oauth
-version: 1.0.0
-description: "Proactive OAuth token refresh with IPC, scheduler, and auth error recovery"
+version: 1.1.0
+description: "OAuth token management: proactive refresh, fallback mode, and auth error recovery"
 core_version: 0.1.0
 adds:
   - container/skills/refresh-oauth/SKILL.md
@@ -11,6 +11,9 @@ adds:
   - src/ipc-handlers/refresh-oauth.ts
 modifies:
   - src/index.ts
+  - src/task-scheduler.ts
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
 conflicts: []
 incompatible_with: []
 depends:

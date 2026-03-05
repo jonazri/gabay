@@ -3,12 +3,10 @@ import path from 'path';
 
 import './ipc-handlers/refresh-oauth.js';
 import {
-  activateFallback,
-  AUTH_ERROR_PATTERN,
+  attemptAuthRecovery,
   ensureTokenFresh,
   initOAuthState,
   readOAuthState,
-  refreshOAuthToken,
   startPrimaryProbe,
   startTokenRefreshScheduler,
   stopPrimaryProbe,
@@ -347,46 +345,34 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
-      if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
-        logger.warn(
-          { group: group.name },
-          'Auth error detected, refreshing token and retrying',
+      if (
+        output.error &&
+        (await attemptAuthRecovery(output.error, (msg) => notifyMainGroup(msg)))
+      ) {
+        const retry = await runContainerAgent(
+          group,
+          {
+            prompt,
+            sessionId,
+            groupFolder: group.folder,
+            chatJid,
+            isMain,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            queue.registerProcess(chatJid, proc, containerName, group.folder),
+          wrappedOnOutput,
         );
-        notifyMainGroup(
-          '[system] Auth token expired — refreshing and retrying.',
-        );
-        const state = readOAuthState();
-        const refreshed = state.usingFallback
-          ? await refreshOAuthToken()
-          : await activateFallback((msg) => notifyMainGroup(`[system] ${msg}`));
-        if (refreshed) {
-          const retry = await runContainerAgent(
-            group,
-            { prompt, sessionId, groupFolder: group.folder, chatJid, isMain },
-            (proc, containerName) =>
-              queue.registerProcess(chatJid, proc, containerName, group.folder),
-            wrappedOnOutput,
-          );
-          if (retry.newSessionId) {
-            sessions[group.folder] = retry.newSessionId;
-            setSession(group.folder, retry.newSessionId);
-          }
-          if (retry.status === 'error') {
-            logger.error(
-              { group: group.name, error: retry.error },
-              'Container agent error after token refresh',
-            );
-            notifyMainGroup(
-              '[system] Token refresh failed. You may need to run "claude login".',
-            );
-            return 'error';
-          }
-          notifyMainGroup('[system] Token refreshed. Services restored.');
-          return 'success';
+        if (retry.newSessionId) {
+          sessions[group.folder] = retry.newSessionId;
+          setSession(group.folder, retry.newSessionId);
         }
-        notifyMainGroup(
-          '[system] Token refresh failed. You may need to run "claude login".',
+        if (retry.status === 'success') return 'success';
+        logger.error(
+          { group: group.name, error: retry.error },
+          'Container agent error after token refresh',
         );
+        return 'error';
       }
       logger.error(
         { group: group.name, error: output.error },

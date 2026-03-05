@@ -24,19 +24,20 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
+  getLatestMessage: vi.fn(() => undefined),
+  getMessageFromMe: vi.fn(() => false),
   setLastGroupSync: vi.fn(),
+  storeReaction: vi.fn(),
   updateChatName: vi.fn(),
 }));
 
 // Mock transcription
 vi.mock('../transcription.js', () => ({
   isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
-  transcribeAudioMessage: vi
-    .fn()
-    .mockResolvedValue({
-      transcript: 'Hello this is a voice message',
-      audioBuffer: Buffer.from('fake-audio'),
-    }),
+  transcribeAudioMessage: vi.fn().mockResolvedValue({
+    transcript: 'Hello this is a voice message',
+    audioBuffer: Buffer.from('fake-audio'),
+  }),
 }));
 
 import { transcribeAudioMessage } from '../transcription.js';

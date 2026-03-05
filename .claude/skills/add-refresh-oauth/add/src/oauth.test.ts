@@ -11,6 +11,7 @@ vi.mock('child_process', () => ({
 }));
 
 import {
+  attemptAuthRecovery,
   readOAuthState,
   writeOAuthState,
   getPrimaryToken,
@@ -165,6 +166,56 @@ describe('ensureTokenFresh', () => {
       fallbackSince: null,
     });
     expect(await ensureTokenFresh()).toBe(true);
+  });
+});
+
+describe('attemptAuthRecovery', () => {
+  it('returns false for non-auth errors', async () => {
+    const notifications: string[] = [];
+    const result = await attemptAuthRecovery(
+      'ENOENT: file not found',
+      (msg) => {
+        notifications.push(msg);
+      },
+    );
+    expect(result).toBe(false);
+    expect(notifications).toHaveLength(0);
+  });
+
+  it('returns true and notifies on auth error when not in fallback', async () => {
+    writeOAuthState({ usingFallback: false, fallbackSince: null });
+    const notifications: string[] = [];
+    const result = await attemptAuthRecovery(
+      'API Error: 401 Unauthorized',
+      (msg) => {
+        notifications.push(msg);
+      },
+    );
+    expect(result).toBe(true);
+    expect(notifications).toContainEqual(
+      expect.stringContaining('Auth token expired'),
+    );
+    expect(notifications).toContainEqual(
+      expect.stringContaining('Token refreshed'),
+    );
+    // activateFallback starts timers — clean up
+    stopTokenRefreshScheduler();
+    stopPrimaryProbe();
+  });
+
+  it('returns true and calls refreshOAuthToken when already in fallback', async () => {
+    writeOAuthState({
+      usingFallback: true,
+      fallbackSince: '2026-03-05T00:00:00.000Z',
+    });
+    const notifications: string[] = [];
+    const result = await attemptAuthRecovery('token expired', (msg) => {
+      notifications.push(msg);
+    });
+    expect(result).toBe(true);
+    expect(notifications).toContainEqual(
+      expect.stringContaining('Token refreshed'),
+    );
   });
 });
 

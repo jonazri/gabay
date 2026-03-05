@@ -19,13 +19,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import {
-  activateFallback,
-  AUTH_ERROR_PATTERN,
-  ensureTokenFresh,
-  readOAuthState,
-  refreshOAuthToken,
-} from './oauth.js';
+import { attemptAuthRecovery, ensureTokenFresh } from './oauth.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 export function computeNextRun(task: ScheduledTask): string | null {
@@ -219,73 +213,45 @@ async function runTask(
     if (output.status === 'error') {
       const outputError = output.error || 'Unknown error';
 
-      if (AUTH_ERROR_PATTERN.test(outputError)) {
-        logger.warn(
-          { taskId: task.id },
-          'Auth error in scheduled task, refreshing token and retrying',
+      if (
+        await attemptAuthRecovery(outputError, (msg) => notifyMain(deps, msg))
+      ) {
+        const retry = await runContainerAgent(
+          group,
+          {
+            prompt: task.prompt,
+            sessionId,
+            groupFolder: task.group_folder,
+            chatJid: task.chat_jid,
+            isMain,
+            isScheduledTask: true,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            deps.onProcess(
+              task.chat_jid,
+              proc,
+              containerName,
+              task.group_folder,
+            ),
+          async (streamedOutput: ContainerOutput) => {
+            if (streamedOutput.result) {
+              result = streamedOutput.result;
+              await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            }
+            if (streamedOutput.status === 'error') {
+              error = streamedOutput.error || 'Unknown error';
+            }
+          },
         );
-        await notifyMain(
-          deps,
-          '[system] Auth token expired — refreshing and retrying.',
-        );
-        const state = readOAuthState();
-        const refreshed = state.usingFallback
-          ? await refreshOAuthToken()
-          : await activateFallback((msg) =>
-              notifyMain(deps, `[system] ${msg}`),
-            );
-        if (refreshed) {
-          const retry = await runContainerAgent(
-            group,
-            {
-              prompt: task.prompt,
-              sessionId,
-              groupFolder: task.group_folder,
-              chatJid: task.chat_jid,
-              isMain,
-              isScheduledTask: true,
-            },
-            (proc, containerName) =>
-              deps.onProcess(
-                task.chat_jid,
-                proc,
-                containerName,
-                task.group_folder,
-              ),
-            async (streamedOutput: ContainerOutput) => {
-              if (streamedOutput.result) {
-                result = streamedOutput.result;
-                // Forward result to user (sendMessage handles formatting)
-                await deps.sendMessage(task.chat_jid, streamedOutput.result);
-              }
-              if (streamedOutput.status === 'error') {
-                error = streamedOutput.error || 'Unknown error';
-              }
-            },
+        if (retry.status === 'error') {
+          error = retry.error || 'Unknown error after retry';
+          logger.error(
+            { taskId: task.id, error },
+            'Scheduled task failed after token refresh',
           );
-          if (retry.status === 'error') {
-            error = retry.error || 'Unknown error after retry';
-            logger.error(
-              { taskId: task.id, error },
-              'Scheduled task failed after token refresh',
-            );
-            await notifyMain(
-              deps,
-              '[system] Token refresh failed. You may need to run "claude login".',
-            );
-          } else {
-            if (retry.result) result = retry.result;
-            await notifyMain(
-              deps,
-              '[system] Token refreshed. Services restored.',
-            );
-          }
         } else {
-          error = outputError;
-          await notifyMain(
-            deps,
-            '[system] Token refresh failed. You may need to run "claude login".',
-          );
+          if (retry.result) result = retry.result;
         }
       } else {
         error = outputError;
