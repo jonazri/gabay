@@ -57,6 +57,13 @@ import {
   shouldProcessMessages,
   runGuardLiftedHooks,
 } from './lifecycle.js';
+import {
+  emitAgentStarting,
+  emitAgentOutput,
+  emitAgentSuccess,
+  emitAgentError,
+  emitMessagePiped,
+} from './message-events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -207,11 +214,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -230,10 +239,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      await emitAgentSuccess(chatJid);
       queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
+      await emitAgentError(chatJid, result.error || null);
       hadError = true;
     }
   });
@@ -433,6 +444,7 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
