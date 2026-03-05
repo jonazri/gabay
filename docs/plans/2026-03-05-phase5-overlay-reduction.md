@@ -1,6 +1,6 @@
 # Phase 5: Overlay Reduction — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan. Dispatch fresh subagents per task, review between tasks.
 
 **Goal:** Reduce ~5,200 lines of duplicated overlay code through lifecycle hooks, message events, CursorManager, and IPC message dispatch, then convert `_accumulated` overlays to delta style.
 
@@ -10,9 +10,47 @@
 
 ---
 
+## Task Dependency Graph
+
+```
+Task 1 (lifecycle.ts)
+Task 3 (CursorManager)        ──┐
+Task 4 (message-events.ts)    ──┼──► Task 6 (wire events into index.ts) ──► Task 10 (shabbat)
+Task 5 (IPC message registry)   │                                        ──► Task 11 (reactions)
+                                 │
+Task 2 (wire lifecycle into      │
+        index.ts) ───────────────┤
+                                 ├──► Task 8 (google-home)
+                                 ├──► Task 9 (group-lifecycle)
+                                 │
+Task 7 (remove dead overlays) ───┘    (independent — can run anytime)
+
+Task 12 (update installed-skills.yaml) ──► depends on Tasks 7-11
+Task 13 (full validation) ──► depends on Task 12
+```
+
+### Parallelization opportunities
+
+| Parallel Group | Tasks | Why parallel |
+|---------------|-------|-------------|
+| **Infra batch 1** | 1, 3, 4, 5 | Independent new files — no shared state |
+| **Infra batch 2** | 2, 6 | Both modify index.ts overlay, but Task 2 = lifecycle dispatch, Task 6 = event emit. Task 6 depends on Tasks 1+4; Task 2 depends on Task 1. Can run sequentially within a single subagent. |
+| **Quick wins** | 7 | Independent of everything — can run in parallel with any infra task |
+| **Migrations** | 8, 9 | Both depend on Task 2 only. Independent of each other — can parallelize. |
+| **Migrations** | 10, 11 | Both depend on Tasks 2+6. Independent of each other — can parallelize. But Task 11 (reactions) is the most complex — give it a dedicated subagent. |
+| **Finalize** | 12, 13 | Sequential, after all migrations complete |
+
+### Critical path
+
+Task 1 → Task 2 → Task 6 (needs 4) → Task 10/11 → Task 12 → Task 13
+
+---
+
 ## Phase A: Infrastructure
 
 ### Task 1: Create lifecycle hook registry
+
+**Depends on:** nothing | **Parallelizable with:** Tasks 3, 4, 5, 7
 
 **Files:**
 - Create: `.claude/skills/add-lifecycle-hooks/add/src/lifecycle.ts`
@@ -237,6 +275,8 @@ git commit -m "feat(skills): add lifecycle hook registry (Phase 5A.1)"
 
 ### Task 2: Wire lifecycle hooks into index.ts
 
+**Depends on:** Task 1 | **Parallelizable with:** Task 7
+
 **Files:**
 - Create: `.claude/skills/add-lifecycle-hooks/modify/src/index.ts` (delta overlay vs upstream)
 
@@ -342,6 +382,8 @@ git commit -m "feat(skills): wire lifecycle hooks into index.ts (Phase 5A.2)"
 ---
 
 ### Task 3: Create CursorManager
+
+**Depends on:** nothing | **Parallelizable with:** Tasks 1, 4, 5, 7
 
 **Files:**
 - Create: `.claude/skills/add-lifecycle-hooks/add/src/cursor-manager.ts`
@@ -501,6 +543,8 @@ git commit -m "feat(skills): add CursorManager class (Phase 5A.3)"
 ---
 
 ### Task 4: Create message lifecycle events
+
+**Depends on:** nothing | **Parallelizable with:** Tasks 1, 3, 5, 7
 
 **Files:**
 - Create: `.claude/skills/add-lifecycle-hooks/add/src/message-events.ts`
@@ -665,6 +709,8 @@ git commit -m "feat(skills): add message lifecycle events (Phase 5A.4)"
 
 ### Task 5: Extend IPC handler registry with message handlers
 
+**Depends on:** nothing | **Parallelizable with:** Tasks 1, 3, 4, 7
+
 **Files:**
 - Modify: `.claude/skills/ipc-handler-registry/add/src/ipc-handlers.ts`
 - Modify: `.claude/skills/ipc-handler-registry/add/src/ipc-handlers.test.ts`
@@ -754,6 +800,8 @@ git commit -m "feat(skills): add IPC message handler registry (Phase 5A.5)"
 
 ### Task 6: Wire message events into index.ts overlay
 
+**Depends on:** Tasks 1, 2, 4 | **Blocks:** Tasks 10, 11
+
 **Files:**
 - Modify: `.claude/skills/add-lifecycle-hooks/modify/src/index.ts`
 
@@ -819,6 +867,8 @@ git commit -m "feat(skills): wire message events into index.ts (Phase 5A.6)"
 
 ### Task 7: Remove whatsapp-replies dead overlays
 
+**Depends on:** nothing | **Parallelizable with:** any task (fully independent)
+
 **Files:**
 - Delete: `.claude/skills/whatsapp-replies/modify/src/index.ts` (925 lines)
 - Delete: `.claude/skills/whatsapp-replies/modify/src/ipc.ts` (503 lines)
@@ -876,6 +926,8 @@ git commit -m "fix(skills): remove dead whatsapp-replies index.ts+ipc.ts overlay
 ## Phase C: Skill Migrations
 
 ### Task 8: Migrate google-home — eliminate index.ts overlay
+
+**Depends on:** Task 2 | **Parallelizable with:** Task 9
 
 **Files:**
 - Modify: `.claude/skills/add-google-home/modify/src/index.ts` → convert to delta or eliminate
@@ -969,6 +1021,8 @@ git commit -m "fix(skills): convert google-home index.ts to delta overlay (Phase
 
 ### Task 9: Migrate group-lifecycle — eliminate index.ts overlay
 
+**Depends on:** Task 2 | **Parallelizable with:** Task 8
+
 **Files:**
 - Modify: `.claude/skills/add-group-lifecycle/modify/src/index.ts` → convert to delta or eliminate
 - Modify: `.claude/skills/add-group-lifecycle/manifest.yaml`
@@ -1017,6 +1071,8 @@ git commit -m "fix(skills): convert group-lifecycle index.ts to delta overlay (P
 ---
 
 ### Task 10: Migrate shabbat-mode — shrink index.ts + eliminate ipc.ts
+
+**Depends on:** Tasks 2, 6 | **Parallelizable with:** Task 11
 
 **Files:**
 - Modify: `.claude/skills/add-shabbat-mode/modify/src/index.ts` → convert to delta
@@ -1193,6 +1249,8 @@ git commit -m "fix(skills): migrate shabbat-mode to lifecycle hooks, eliminate i
 
 ### Task 11: Migrate reactions — shrink index.ts + eliminate ipc.ts
 
+**Depends on:** Tasks 2, 3, 5, 6 | **Parallelizable with:** Task 10 | **Note:** Most complex task — give dedicated subagent
+
 **Files:**
 - Modify: `.claude/skills/add-reactions/modify/src/index.ts` → convert to smaller delta
 - Modify: `.claude/skills/add-reactions/modify/src/ipc.ts` → eliminate or shrink
@@ -1276,6 +1334,8 @@ git commit -m "fix(skills): convert reactions overlays to delta, use message eve
 
 ### Task 12: Update installed-skills.yaml and dependency graph
 
+**Depends on:** Tasks 7, 8, 9, 10, 11 | **Blocks:** Task 13
+
 **Files:**
 - Modify: `.nanoclaw/installed-skills.yaml`
 
@@ -1326,6 +1386,8 @@ git commit -m "fix(skills): update install order and dependencies for lifecycle-
 ## Phase D: Validation
 
 ### Task 13: Full validation
+
+**Depends on:** Task 12 | **Cannot parallelize** — must run after everything
 
 **Step 1: Clean build from scratch**
 
