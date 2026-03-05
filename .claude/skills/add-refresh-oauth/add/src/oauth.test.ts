@@ -2,6 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
+// Mock child_process so refreshOAuthToken() doesn't need real refresh.sh
+vi.mock('child_process', () => ({
+  execFile: vi.fn(
+    (_path: string, _opts: unknown, cb: (err: Error | null) => void) =>
+      cb(null),
+  ),
+}));
+
 import {
   readOAuthState,
   writeOAuthState,
@@ -102,7 +110,6 @@ describe('activateFallback', () => {
     const alerts: string[] = [];
     const ok = await activateFallback((msg) => alerts.push(msg));
 
-    // refresh.sh runs and succeeds on this machine
     expect(ok).toBe(true);
     const state = readOAuthState();
     expect(state.usingFallback).toBe(true);
