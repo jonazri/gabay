@@ -73,6 +73,7 @@ import {
   shouldProcessMessages,
   runGuardLiftedHooks,
 } from './lifecycle.js';
+import { CursorManager } from './cursor-manager.js';
 import {
   emitAgentStarting,
   emitAgentOutput,
@@ -87,10 +88,7 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
-// Tracks cursor value before messages were piped to an active container.
-// Used to roll back if the container dies after piping.
-let cursorBeforePipe: Record<string, string> = {};
+const agentCursors = new CursorManager();
 let messageLoopRunning = false;
 
 let statusTracker: StatusTracker;
@@ -101,17 +99,17 @@ function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+    agentCursors.loadAll(agentTs ? JSON.parse(agentTs) : {});
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
+    agentCursors.loadAll({});
   }
   const pipeCursor = getRouterState('cursor_before_pipe');
   try {
-    cursorBeforePipe = pipeCursor ? JSON.parse(pipeCursor) : {};
+    agentCursors.loadSavedAll(pipeCursor ? JSON.parse(pipeCursor) : {});
   } catch {
     logger.warn('Corrupted cursor_before_pipe in DB, resetting');
-    cursorBeforePipe = {};
+    agentCursors.loadSavedAll({});
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -123,8 +121,11 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
-  setRouterState('cursor_before_pipe', JSON.stringify(cursorBeforePipe));
+  setRouterState('last_agent_timestamp', JSON.stringify(agentCursors.getAll()));
+  setRouterState(
+    'cursor_before_pipe',
+    JSON.stringify(agentCursors.getSavedAll()),
+  );
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -194,7 +195,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.isMain === true;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+  const sinceTimestamp = agentCursors.get(chatJid);
   const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
@@ -215,9 +216,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
+  const previousCursor = agentCursors.get(chatJid);
+  agentCursors.advance(
+    chatJid,
+    missedMessages[missedMessages.length - 1].timestamp,
+  );
   saveState();
 
   logger.info(
@@ -304,9 +307,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (outputSentToUser) {
       // Output was sent for the initial batch, so don't roll those back.
       // But if messages were piped AFTER that output, roll back to recover them.
-      if (cursorBeforePipe[chatJid]) {
-        lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
-        delete cursorBeforePipe[chatJid];
+      if (agentCursors.hasSaved(chatJid)) {
+        agentCursors.rollback(chatJid);
         saveState();
         logger.warn(
           { group: group.name },
@@ -323,8 +325,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
     // No output sent — roll back everything so the full batch is retried
-    lastAgentTimestamp[chatJid] = previousCursor;
-    delete cursorBeforePipe[chatJid];
+    agentCursors.advance(chatJid, previousCursor);
+    agentCursors.clearSaved(chatJid);
     saveState();
     logger.warn(
       { group: group.name },
@@ -335,7 +337,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // Success — clear pipe tracking (markAllDone already fired in streaming callback)
-  delete cursorBeforePipe[chatJid];
+  agentCursors.clearSaved(chatJid);
   saveState();
   return true;
 }
@@ -500,11 +502,11 @@ async function startMessageLoop(): Promise<void> {
             }
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
+          // Pull all messages since agentCursors so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
-            lastAgentTimestamp[chatJid] || '',
+            agentCursors.get(chatJid),
             ASSISTANT_NAME,
           );
           const messagesToSend =
@@ -520,16 +522,18 @@ async function startMessageLoop(): Promise<void> {
               }
             }
             // Save cursor before first pipe so we can roll back if container dies
-            if (!cursorBeforePipe[chatJid]) {
-              cursorBeforePipe[chatJid] = lastAgentTimestamp[chatJid] || '';
+            if (!agentCursors.hasSaved(chatJid)) {
+              agentCursors.save(chatJid);
             }
             await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
+            agentCursors.advance(
+              chatJid,
+              messagesToSend[messagesToSend.length - 1].timestamp,
+            );
             saveState();
             // Show typing indicator while the container processes the piped message
             channel
@@ -557,7 +561,9 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   // Roll back any piped-message cursors that were persisted before a crash.
   let rolledBack = false;
-  for (const [chatJid, savedCursor] of Object.entries(cursorBeforePipe)) {
+  for (const [chatJid, savedCursor] of Object.entries(
+    agentCursors.getSavedAll(),
+  )) {
     if (queue.isActive(chatJid)) {
       logger.debug(
         { chatJid },
@@ -569,8 +575,7 @@ function recoverPendingMessages(): void {
       { chatJid, rolledBackTo: savedCursor },
       'Recovery: rolling back piped-message cursor',
     );
-    lastAgentTimestamp[chatJid] = savedCursor;
-    delete cursorBeforePipe[chatJid];
+    agentCursors.rollback(chatJid);
     rolledBack = true;
   }
   if (rolledBack) {
@@ -578,7 +583,7 @@ function recoverPendingMessages(): void {
   }
 
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+    const sinceTimestamp = agentCursors.get(chatJid);
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
