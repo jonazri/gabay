@@ -3,10 +3,15 @@ import path from 'path';
 
 import './ipc-handlers/refresh-oauth.js';
 import {
+  activateFallback,
   AUTH_ERROR_PATTERN,
   ensureTokenFresh,
+  initOAuthState,
+  readOAuthState,
   refreshOAuthToken,
+  startPrimaryProbe,
   startTokenRefreshScheduler,
+  stopPrimaryProbe,
   stopTokenRefreshScheduler,
 } from './oauth.js';
 import {
@@ -350,7 +355,10 @@ async function runAgent(
         notifyMainGroup(
           '[system] Auth token expired — refreshing and retrying.',
         );
-        const refreshed = await refreshOAuthToken();
+        const state = readOAuthState();
+        const refreshed = state.usingFallback
+          ? await refreshOAuthToken()
+          : await activateFallback((msg) => notifyMainGroup(`[system] ${msg}`));
         if (refreshed) {
           const retry = await runContainerAgent(
             group,
@@ -531,6 +539,7 @@ async function main(): Promise<void> {
     // compatibility (google-home uses the gap after queue.shutdown). Functionally
     // equivalent — clearing a setInterval is order-independent.
     stopTokenRefreshScheduler();
+    stopPrimaryProbe();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -590,11 +599,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Ensure token is fresh at startup so the first container doesn't hit an expired token
+  // Initialize OAuth state machine and ensure token is fresh
+  initOAuthState();
   await ensureTokenFresh();
 
-  // Schedule proactive token refresh
-  startTokenRefreshScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
+  // In fallback mode, start proactive refresh and primary token probe
+  if (readOAuthState().usingFallback) {
+    const oauthAlert = (msg: string) => notifyMainGroup(`[system] ${msg}`);
+    startTokenRefreshScheduler(oauthAlert);
+    startPrimaryProbe(oauthAlert);
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

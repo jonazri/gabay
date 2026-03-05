@@ -20,8 +20,10 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  activateFallback,
   AUTH_ERROR_PATTERN,
   ensureTokenFresh,
+  readOAuthState,
   refreshOAuthToken,
 } from './oauth.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
@@ -226,7 +228,12 @@ async function runTask(
           deps,
           '[system] Auth token expired — refreshing and retrying.',
         );
-        const refreshed = await refreshOAuthToken();
+        const state = readOAuthState();
+        const refreshed = state.usingFallback
+          ? await refreshOAuthToken()
+          : await activateFallback((msg) =>
+              notifyMain(deps, `[system] ${msg}`),
+            );
         if (refreshed) {
           const retry = await runContainerAgent(
             group,
