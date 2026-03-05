@@ -111,6 +111,16 @@ function readEnvToken(): string | null {
   }
 }
 
+/** After refresh.sh rewrites .env, propagate the new token into process.env
+ * so that readSecrets() (which prefers process.env) passes the fresh token. */
+function syncRefreshedToken(): void {
+  const token = readEnvToken();
+  if (token) {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+    logger.debug('Synced refreshed token from .env into process.env');
+  }
+}
+
 // --- Fallback activation ---
 
 /**
@@ -125,7 +135,9 @@ export async function activateFallback(
   const state = readOAuthState();
   if (state.usingFallback) {
     // Already in fallback — just refresh
-    return refreshOAuthToken();
+    const ok = await refreshOAuthToken();
+    if (ok) syncRefreshedToken();
+    return ok;
   }
 
   logger.warn('Activating OAuth fallback mode — primary token failed');
@@ -135,6 +147,7 @@ export async function activateFallback(
 
   const ok = await refreshOAuthToken();
   if (ok) {
+    syncRefreshedToken();
     startTokenRefreshScheduler(onAlert);
     startPrimaryProbe(onAlert);
     onAlert?.('Primary token failed — switched to fallback refresh cycle.');
@@ -245,7 +258,9 @@ export async function ensureTokenFresh(): Promise<boolean> {
       { remainingMs, expiresAt: new Date(expiresAt).toISOString() },
       'Token expired or expiring soon, refreshing before container spawn',
     );
-    return await refreshOAuthToken();
+    const ok = await refreshOAuthToken();
+    if (ok) syncRefreshedToken();
+    return ok;
   } catch (err) {
     logger.debug({ err }, 'Could not check token freshness');
     return true;
@@ -331,6 +346,7 @@ export function startTokenRefreshScheduler(
     refreshTimer = setTimeout(async () => {
       const ok = await refreshOAuthToken();
       if (ok) {
+        syncRefreshedToken();
         if (hadFailure) {
           hadFailure = false;
           onAlert?.('OAuth token refreshed. Services restored.');
