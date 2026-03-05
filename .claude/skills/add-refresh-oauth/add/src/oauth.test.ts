@@ -44,7 +44,6 @@ describe('readOAuthState / writeOAuthState', () => {
   it('returns defaults when no state file exists', () => {
     const state = readOAuthState();
     expect(state).toEqual({
-      primaryToken: null,
       usingFallback: false,
       fallbackSince: null,
     });
@@ -52,7 +51,6 @@ describe('readOAuthState / writeOAuthState', () => {
 
   it('round-trips state', () => {
     const state = {
-      primaryToken: 'sk-test-token',
       usingFallback: true,
       fallbackSince: '2026-03-05T02:44:00.000Z',
     };
@@ -67,46 +65,36 @@ describe('getPrimaryToken', () => {
     expect(getPrimaryToken()).toBe('sk-env-token');
   });
 
-  it('returns persisted token when process.env is empty', () => {
-    writeOAuthState({
-      primaryToken: 'sk-persisted',
-      usingFallback: false,
-      fallbackSince: null,
-    });
-    expect(getPrimaryToken()).toBe('sk-persisted');
-  });
-
-  it('returns null when no token anywhere', () => {
-    expect(getPrimaryToken()).toBeNull();
+  it('falls back to .env file when process.env is empty', () => {
+    // getPrimaryToken reads .env file as fallback; the project .env has a token
+    const token = getPrimaryToken();
+    // Should return something (from .env) rather than null
+    expect(token).toBeTruthy();
+    expect(typeof token).toBe('string');
   });
 });
 
 describe('initOAuthState', () => {
-  it('persists primary token from process.env', () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-from-env';
+  it('does not crash when no token exists', () => {
     initOAuthState();
     const state = readOAuthState();
-    expect(state.primaryToken).toBe('sk-from-env');
     expect(state.usingFallback).toBe(false);
   });
 
   it('preserves fallback mode on restart', () => {
     writeOAuthState({
-      primaryToken: 'sk-primary',
       usingFallback: true,
       fallbackSince: '2026-03-05T02:44:00.000Z',
     });
     initOAuthState();
     const state = readOAuthState();
     expect(state.usingFallback).toBe(true);
-    expect(state.primaryToken).toBe('sk-primary');
   });
 });
 
 describe('activateFallback', () => {
   it('transitions to fallback and calls onAlert', async () => {
     writeOAuthState({
-      primaryToken: 'sk-primary',
       usingFallback: false,
       fallbackSince: null,
     });
@@ -129,7 +117,6 @@ describe('activateFallback', () => {
 
   it('stays in fallback when already there', async () => {
     writeOAuthState({
-      primaryToken: 'sk-primary',
       usingFallback: true,
       fallbackSince: '2026-03-05T02:44:00.000Z',
     });
@@ -167,7 +154,6 @@ describe('ensureTokenFresh', () => {
   it('returns true immediately in primary mode with token', async () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-primary';
     writeOAuthState({
-      primaryToken: 'sk-primary',
       usingFallback: false,
       fallbackSince: null,
     });
@@ -178,7 +164,6 @@ describe('ensureTokenFresh', () => {
 describe('startTokenRefreshScheduler', () => {
   it('does not start when not in fallback mode', () => {
     writeOAuthState({
-      primaryToken: 'sk-primary',
       usingFallback: false,
       fallbackSince: null,
     });

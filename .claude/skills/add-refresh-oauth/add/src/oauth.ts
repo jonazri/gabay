@@ -21,13 +21,11 @@ const PROBE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 // --- State types ---
 
 interface OAuthState {
-  primaryToken: string | null;
   usingFallback: boolean;
   fallbackSince: string | null;
 }
 
 const DEFAULT_STATE: OAuthState = {
-  primaryToken: null,
   usingFallback: false,
   fallbackSince: null,
 };
@@ -52,11 +50,9 @@ export function writeOAuthState(state: OAuthState): void {
 
 // --- Token helpers ---
 
-/** Get the primary (long-term) token from process.env or persisted state. */
+/** Get the primary (long-term) token from process.env or .env file. */
 export function getPrimaryToken(): string | null {
-  return (
-    process.env.CLAUDE_CODE_OAUTH_TOKEN || readOAuthState().primaryToken || null
-  );
+  return process.env.CLAUDE_CODE_OAUTH_TOKEN || readEnvToken() || null;
 }
 
 /** Write a token value into .env (atomic replace). */
@@ -84,8 +80,8 @@ function writeTokenToEnv(token: string): void {
 
 /**
  * Initialize OAuth state on startup.
- * First run: persist the primary token from process.env or .env.
  * Restart in fallback mode: stay in fallback (state file persists).
+ * Otherwise: log whether a primary token is available.
  */
 export function initOAuthState(): void {
   const state = readOAuthState();
@@ -98,12 +94,9 @@ export function initOAuthState(): void {
     return;
   }
 
-  // Discover and persist the primary token
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN || readEnvToken();
+  const token = getPrimaryToken();
   if (token) {
-    state.primaryToken = token;
-    writeOAuthState(state);
-    logger.info('initOAuthState: primary token discovered and persisted');
+    logger.info('initOAuthState: primary token available');
   } else {
     logger.info('initOAuthState: no primary token found');
   }
@@ -163,7 +156,7 @@ export async function probePrimaryToken(token: string): Promise<boolean> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': token,
+        Authorization: `Bearer ${token}`,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -186,7 +179,7 @@ export function startPrimaryProbe(onAlert?: (msg: string) => void): void {
     const state = readOAuthState();
     if (!state.usingFallback) return; // Already restored
 
-    const primary = state.primaryToken || process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const primary = getPrimaryToken();
     if (!primary) {
       logger.debug('No primary token to probe');
       probeTimer = setTimeout(probe, PROBE_INTERVAL_MS);

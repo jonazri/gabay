@@ -225,7 +225,7 @@ function readSecrets(): Record<string, string> {
   const secrets = readEnvFile(keys);
   // process.env takes precedence (e.g. bashrc token under systemd)
   for (const key of keys) {
-    if (process.env[key]) secrets[key] = process.env[key];
+    if (process.env[key]) secrets[key] = process.env[key]!;
   }
   return secrets;
 }
