@@ -318,7 +318,7 @@ akiflow:list-events() {
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM events
     WHERE json_extract(data,'$.start') >= '${start}'
-      AND json_extract(data,'$.start') < '${end}'
+      AND json_extract(data,'$.start') < date('${end}', '+1 day')
       AND json_extract(data,'$.deleted_at') IS NULL" \
     | jq '[.[].data | fromjson]'
 }
@@ -419,6 +419,9 @@ akiflow:list-slots() {
 ```bash
 akiflow:list-slots-today() {
   local date="${1:-$(date +%Y-%m-%d)}"
+  if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "akiflow: invalid date: '$date' (expected YYYY-MM-DD)" >&2; return 1
+  fi
   sqlite3 -json "$AKIFLOW_DB" "
     SELECT data FROM time_slots
     WHERE json_extract(data,'$.deleted_at') IS NULL
