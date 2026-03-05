@@ -148,17 +148,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
+  const channel = findChannel(channels, chatJid);
+  if (!channel) {
+    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+    return true;
+  }
+
   if (isShabbatOrYomTov()) {
     logger.debug(
       { group: group.name },
       'Shabbat/Yom Tov active, skipping message processing',
     );
-    return true;
-  }
-
-  const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return true;
   }
 
@@ -533,13 +533,14 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  initShabbatSchedule();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
     stopCandleLightingNotifier();
+    for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -597,8 +598,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  initShabbatSchedule();
-
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -635,9 +634,6 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
-  queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
-
   // Candle lighting reminders (erev Shabbat and erev Yom Tov)
   const userJid = Object.entries(registeredGroups).find(
     ([_, g]) => g.isMain === true,
@@ -651,6 +647,8 @@ async function main(): Promise<void> {
     logger.warn('No main group registered — candle lighting notifier disabled');
   }
 
+  queue.setProcessMessagesFn(processGroupMessages);
+  recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
