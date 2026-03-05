@@ -28,3 +28,32 @@ describe('IPC Handler Registry', () => {
     );
   });
 });
+
+describe('IPC message handler registry', () => {
+  let registerIpcMessageHandler: typeof import('./ipc-handlers.js').registerIpcMessageHandler;
+  let getIpcMessageHandler: typeof import('./ipc-handlers.js').getIpcMessageHandler;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('./ipc-handlers.js');
+    registerIpcMessageHandler = mod.registerIpcMessageHandler;
+    getIpcMessageHandler = mod.getIpcMessageHandler;
+  });
+
+  it('registers and retrieves a message handler', () => {
+    const handler = vi.fn();
+    registerIpcMessageHandler('reaction', handler);
+    expect(getIpcMessageHandler('reaction')).toBe(handler);
+  });
+
+  it('returns undefined for unregistered message type', () => {
+    expect(getIpcMessageHandler('nonexistent')).toBeUndefined();
+  });
+
+  it('throws on duplicate message handler registration', () => {
+    registerIpcMessageHandler('test_msg', vi.fn());
+    expect(() => registerIpcMessageHandler('test_msg', vi.fn())).toThrow(
+      'IPC message handler already registered for type: test_msg',
+    );
+  });
+});
