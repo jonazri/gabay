@@ -15,13 +15,9 @@ structured:
   npm_dependencies:
     "@hebcal/core": "^6.0.8"
 modify_base:
-  src/index.ts: google-home
+  src/index.ts: lifecycle-hooks
   src/task-scheduler.ts: _accumulated
 conflicts: []
 depends:
   - lifecycle-hooks
-  - reactions
-  - refresh-oauth
-  - group-lifecycle
-  - google-home
 test: "npx vitest run src/shabbat.test.ts"

@@ -8,9 +8,9 @@ modifies:
   - src/db.ts
   - src/index.ts
 modify_base:
-  src/index.ts: reactions
+  src/index.ts: lifecycle-hooks
 conflicts: []
 depends:
   - ipc-handler-registry
-  - reactions
+  - lifecycle-hooks
 test: "npx tsc --noEmit"

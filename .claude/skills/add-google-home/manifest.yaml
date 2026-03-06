@@ -15,9 +15,9 @@ modifies:
   - src/container-runner.ts
   - container/Dockerfile
 modify_base:
-  src/index.ts: group-lifecycle
+  src/index.ts: lifecycle-hooks
 conflicts: []
 incompatible_with: []
-depends: [ipc-handler-registry, lifecycle-hooks, reactions, refresh-oauth, group-lifecycle]
+depends: [ipc-handler-registry, lifecycle-hooks, refresh-oauth]
 tested_with: []
 test: "npx tsc --noEmit"
