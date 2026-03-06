@@ -59,10 +59,20 @@ export function writeIpcErrorResponse(
 ): void {
   if (!requestId) return;
 
+  // Sanitize requestId to prevent path traversal
+  const safeId = path.basename(requestId);
+  if (!safeId || safeId !== requestId) {
+    logger.warn(
+      { requestId },
+      'Rejected unsafe requestId in IPC error response',
+    );
+    return;
+  }
+
   const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
   fs.mkdirSync(responsesDir, { recursive: true });
 
-  const responseFile = path.join(responsesDir, `${requestId}.json`);
+  const responseFile = path.join(responsesDir, `${safeId}.json`);
   const tempFile = `${responseFile}.tmp`;
   fs.writeFileSync(
     tempFile,
