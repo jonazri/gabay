@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 
 import {
   ASSISTANT_NAME,
@@ -40,6 +41,11 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import {
+  shutdownGoogleAssistant,
+  startGoogleTokenScheduler,
+  stopGoogleTokenScheduler,
+} from './google-assistant.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -47,14 +53,24 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import {
-  shutdownGoogleAssistant,
-  startGoogleTokenScheduler,
-  stopGoogleTokenScheduler,
-} from './google-assistant.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import {
+  runChannelsReadyHooks,
+  runShutdownHooks,
+  runStartupHooks,
+  shouldProcessMessages,
+  runGuardLiftedHooks,
+} from './lifecycle.js';
+import { CursorManager } from './cursor-manager.js';
+import {
+  emitAgentStarting,
+  emitAgentOutput,
+  emitAgentSuccess,
+  emitAgentError,
+  emitMessagePiped,
+} from './message-events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -62,7 +78,7 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
+const agentCursors = new CursorManager();
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -72,10 +88,10 @@ function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+    agentCursors.loadAll(agentTs ? JSON.parse(agentTs) : {});
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
+    agentCursors.loadAll({});
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -87,7 +103,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState('last_agent_timestamp', JSON.stringify(agentCursors.getAll()));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -153,9 +169,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  if (!shouldProcessMessages()) return true;
+
   const isMainGroup = group.isMain === true;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+  const sinceTimestamp = agentCursors.get(chatJid);
   const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
@@ -179,9 +197,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
+  const previousCursor = agentCursors.get(chatJid);
+  agentCursors.advance(
+    chatJid,
+    missedMessages[missedMessages.length - 1].timestamp,
+  );
   saveState();
 
   logger.info(
@@ -203,11 +223,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -226,10 +248,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      await emitAgentSuccess(chatJid);
       queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
+      await emitAgentError(chatJid, result.error || null);
       hadError = true;
     }
   });
@@ -248,7 +272,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
+    agentCursors.advance(chatJid, previousCursor);
     saveState();
     logger.warn(
       { group: group.name },
@@ -350,7 +374,20 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  let wasGuarded = !shouldProcessMessages();
+
   while (true) {
+    // Lifecycle guard: skip processing when guards are active (e.g. Shabbat mode)
+    if (!shouldProcessMessages()) {
+      wasGuarded = true;
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+      continue;
+    }
+    if (wasGuarded) {
+      await runGuardLiftedHooks();
+      wasGuarded = false;
+    }
+
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
@@ -404,11 +441,11 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
+          // Pull all messages since agentCursors so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
-            lastAgentTimestamp[chatJid] || '',
+            agentCursors.get(chatJid),
             ASSISTANT_NAME,
           );
           const messagesToSend =
@@ -416,12 +453,15 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
+            agentCursors.advance(
+              chatJid,
+              messagesToSend[messagesToSend.length - 1].timestamp,
+            );
             saveState();
             // Show typing indicator while the container processes the piped message
             channel
@@ -448,7 +488,7 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+    const sinceTimestamp = agentCursors.get(chatJid);
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
@@ -470,14 +510,16 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  await runStartupHooks();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    stopGoogleTokenScheduler();
     await queue.shutdown(10000);
+    stopGoogleTokenScheduler();
     shutdownGoogleAssistant();
     for (const ch of channels) await ch.disconnect();
+    await runShutdownHooks();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -530,6 +572,7 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
+  await runChannelsReadyHooks(channels);
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
@@ -581,10 +624,9 @@ async function main(): Promise<void> {
 }
 
 // Guard: only run when executed directly, not when imported by tests
-const isDirectRun =
-  process.argv[1] &&
-  new URL(import.meta.url).pathname ===
-    new URL(`file://${process.argv[1]}`).pathname;
+const thisFile = fileURLToPath(import.meta.url);
+const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const isDirectRun = entryFile != null && thisFile === entryFile;
 
 if (isDirectRun) {
   main().catch((err) => {

@@ -25,7 +25,6 @@ import {
 } from './container-runtime.js';
 import {
   getAllChats,
-  deleteRegisteredGroup,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
@@ -41,7 +40,6 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import './ipc-handlers/group-lifecycle.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -125,15 +123,6 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
-}
-
-function unregisterGroup(jid: string): boolean {
-  const deleted = deleteRegisteredGroup(jid);
-  if (deleted) {
-    delete registeredGroups[jid];
-    logger.info({ jid }, 'Group unregistered');
-  }
-  return deleted;
 }
 
 /**
@@ -615,7 +604,6 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    unregisterGroup,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });

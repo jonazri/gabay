@@ -14,9 +14,12 @@ modifies:
   - src/task-scheduler.ts
   - src/container-runner.ts
   - container/agent-runner/src/index.ts
+modify_base:
+  src/index.ts: lifecycle-hooks
 conflicts: []
 incompatible_with: []
 depends:
   - ipc-handler-registry
+  - lifecycle-hooks
 tested_with: []
 test: "npx tsc --noEmit"
