@@ -46,6 +46,7 @@ import {
   startGoogleTokenScheduler,
   stopGoogleTokenScheduler,
 } from './google-assistant.js';
+import './ipc-handlers/google-home.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
