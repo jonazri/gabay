@@ -14,7 +14,6 @@ modifies:
   - src/types.ts
   - src/ipc.ts
   - src/index.ts
-  - src/group-queue.ts
   - container/agent-runner/src/ipc-mcp-stdio.ts
   - src/channels/whatsapp.test.ts
   - src/group-queue.test.ts
