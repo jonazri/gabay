@@ -25,9 +25,9 @@ The host has no handler registered for the IPC type you used.
 
 The host handler exists but crashed while processing your request. This is always a host-side bug.
 
-### `malformed_request` / `invalid_request` — Bad Request
+### `malformed_request` / `invalid_request` — Bad Request (reserved)
 
-Your IPC request has malformed JSON or missing required fields. Fix the request and retry.
+These error codes are defined but not currently emitted by the host. If you see them in the future, it means your IPC request had malformed JSON or missing required fields — fix the request and retry.
 
 ## Bug Report Flow
 
