@@ -18,23 +18,33 @@ beforeEach(() => _resetForTests());
 describe('startup/shutdown hooks', () => {
   it('runs startup hooks in registration order', async () => {
     const order: number[] = [];
-    onStartup(() => { order.push(1); });
-    onStartup(() => { order.push(2); });
+    onStartup(() => {
+      order.push(1);
+    });
+    onStartup(() => {
+      order.push(2);
+    });
     await runStartupHooks();
     expect(order).toEqual([1, 2]);
   });
 
   it('runs shutdown hooks in reverse registration order', async () => {
     const order: number[] = [];
-    onShutdown(() => { order.push(1); });
-    onShutdown(() => { order.push(2); });
+    onShutdown(() => {
+      order.push(1);
+    });
+    onShutdown(() => {
+      order.push(2);
+    });
     await runShutdownHooks();
     expect(order).toEqual([2, 1]);
   });
 
   it('runs channels-ready hooks with channel list', async () => {
     const received: any[] = [];
-    onChannelsReady((chs) => { received.push(chs); });
+    onChannelsReady((chs) => {
+      received.push(chs);
+    });
     const fakeChannels = [{ name: 'whatsapp' }] as any;
     await runChannelsReadyHooks(fakeChannels);
     expect(received).toEqual([fakeChannels]);
@@ -57,11 +67,13 @@ describe('processing guards', () => {
     expect(shouldProcessMessages()).toBe(true);
   });
 
-  it('runs guard-lifted hooks when guard transitions from false to true', async () => {
+  it('runs guard-lifted hooks after guard returns true', async () => {
     let guardActive = true;
     registerProcessingGuard(() => !guardActive);
     const calls: string[] = [];
-    onGuardLifted(async () => { calls.push('lifted'); });
+    onGuardLifted(async () => {
+      calls.push('lifted');
+    });
 
     // Guard active → shouldProcess false
     expect(shouldProcessMessages()).toBe(false);

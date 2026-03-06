@@ -17,5 +17,6 @@ modify_base:
   src/channels/whatsapp.test.ts: reactions
 conflicts:
   - voice-transcription
-depends: []
+depends:
+  - reactions
 test: "npx vitest run src/channels/whatsapp.test.ts"
