@@ -24,13 +24,20 @@ describe('writeIpcNotification', () => {
     vi.resetModules();
     const { writeIpcNotification } = await import('./ipc-self-heal.js');
 
-    writeIpcNotification('test-group', 'unknown_ipc_type', 'schedule_tasks', 'No handler registered for type "schedule_tasks"');
+    writeIpcNotification(
+      'test-group',
+      'unknown_ipc_type',
+      'schedule_tasks',
+      'No handler registered for type "schedule_tasks"',
+    );
 
     const inputDir = path.join(testDataDir, 'ipc', 'test-group', 'input');
-    const files = fs.readdirSync(inputDir).filter(f => f.endsWith('.json'));
+    const files = fs.readdirSync(inputDir).filter((f) => f.endsWith('.json'));
     expect(files).toHaveLength(1);
 
-    const content = JSON.parse(fs.readFileSync(path.join(inputDir, files[0]), 'utf-8'));
+    const content = JSON.parse(
+      fs.readFileSync(path.join(inputDir, files[0]), 'utf-8'),
+    );
     expect(content.type).toBe('message');
     expect(content.text).toContain('[IPC Error]');
     expect(content.text).toContain('schedule_tasks');
@@ -51,9 +58,21 @@ describe('writeIpcErrorResponse', () => {
     vi.resetModules();
     const { writeIpcErrorResponse } = await import('./ipc-self-heal.js');
 
-    writeIpcErrorResponse('test-group', 'req-123', 'unknown_ipc_type', 'bad_type', 'No handler');
+    writeIpcErrorResponse(
+      'test-group',
+      'req-123',
+      'unknown_ipc_type',
+      'bad_type',
+      'No handler',
+    );
 
-    const responsePath = path.join(testDataDir, 'ipc', 'test-group', 'responses', 'req-123.json');
+    const responsePath = path.join(
+      testDataDir,
+      'ipc',
+      'test-group',
+      'responses',
+      'req-123.json',
+    );
     expect(fs.existsSync(responsePath)).toBe(true);
 
     const content = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
@@ -67,9 +86,20 @@ describe('writeIpcErrorResponse', () => {
     vi.resetModules();
     const { writeIpcErrorResponse } = await import('./ipc-self-heal.js');
 
-    writeIpcErrorResponse('test-group', undefined, 'handler_error', 'foo', 'Crash');
+    writeIpcErrorResponse(
+      'test-group',
+      undefined,
+      'handler_error',
+      'foo',
+      'Crash',
+    );
 
-    const responsesDir = path.join(testDataDir, 'ipc', 'test-group', 'responses');
+    const responsesDir = path.join(
+      testDataDir,
+      'ipc',
+      'test-group',
+      'responses',
+    );
     expect(fs.existsSync(responsesDir)).toBe(false);
   });
 });
@@ -87,8 +117,11 @@ describe('processTaskIpc self-heal integration', () => {
     sendMessage: async () => {},
     registeredGroups: () => ({
       'main@g.us': {
-        name: 'Main', folder: 'main', trigger: 'always' as const,
-        added_at: '2024-01-01', isMain: true,
+        name: 'Main',
+        folder: 'main',
+        trigger: 'always' as const,
+        added_at: '2024-01-01',
+        isMain: true,
       },
     }),
     registerGroup: () => {},
@@ -112,15 +145,25 @@ describe('processTaskIpc self-heal integration', () => {
 
     // Should have written notification
     const inputDir = path.join(testDataDir, 'ipc', 'main', 'input');
-    const inputFiles = fs.readdirSync(inputDir).filter(f => f.endsWith('.json'));
+    const inputFiles = fs
+      .readdirSync(inputDir)
+      .filter((f) => f.endsWith('.json'));
     expect(inputFiles.length).toBeGreaterThanOrEqual(1);
 
-    const notification = JSON.parse(fs.readFileSync(path.join(inputDir, inputFiles[0]), 'utf-8'));
+    const notification = JSON.parse(
+      fs.readFileSync(path.join(inputDir, inputFiles[0]), 'utf-8'),
+    );
     expect(notification.text).toContain('[IPC Error]');
     expect(notification.text).toContain('nonexistent_type');
 
     // Should have written error response
-    const responsePath = path.join(testDataDir, 'ipc', 'main', 'responses', 'req-456.json');
+    const responsePath = path.join(
+      testDataDir,
+      'ipc',
+      'main',
+      'responses',
+      'req-456.json',
+    );
     expect(fs.existsSync(responsePath)).toBe(true);
     const response = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
     expect(response.status).toBe('error');
@@ -145,10 +188,14 @@ describe('processTaskIpc self-heal integration', () => {
     );
 
     const inputDir = path.join(testDataDir, 'ipc', 'main', 'input');
-    const inputFiles = fs.readdirSync(inputDir).filter(f => f.endsWith('.json'));
+    const inputFiles = fs
+      .readdirSync(inputDir)
+      .filter((f) => f.endsWith('.json'));
     expect(inputFiles.length).toBeGreaterThanOrEqual(1);
 
-    const notification = JSON.parse(fs.readFileSync(path.join(inputDir, inputFiles[0]), 'utf-8'));
+    const notification = JSON.parse(
+      fs.readFileSync(path.join(inputDir, inputFiles[0]), 'utf-8'),
+    );
     expect(notification.text).toContain('handler_error');
     expect(notification.text).toContain('handler boom');
   });

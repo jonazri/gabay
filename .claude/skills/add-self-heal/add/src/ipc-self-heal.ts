@@ -26,7 +26,7 @@ export function writeIpcNotification(
 
   const agentAction =
     errorCode === 'unknown_ipc_type'
-      ? 'If this is your mistake (typo, wrong type name), correct and retry. If the type matches a known CLI tool or skill, it\'s a host-side bug — the handler registration is broken. Write a bug report to /workspace/group/feature-requests/.'
+      ? "If this is your mistake (typo, wrong type name), correct and retry. If the type matches a known CLI tool or skill, it's a host-side bug — the handler registration is broken. Write a bug report to /workspace/group/feature-requests/."
       : errorCode === 'handler_error'
         ? 'The host handler crashed. This is a host-side bug. Write a bug report to /workspace/group/feature-requests/ and inform the user.'
         : 'This is likely your mistake. Fix the request and retry.';

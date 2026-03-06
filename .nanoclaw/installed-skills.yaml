@@ -9,6 +9,7 @@ skills:
   - reactions
   - refresh-oauth
   - group-lifecycle
+  - self-heal
   - google-home
   - shabbat-mode
   - container-hardening
