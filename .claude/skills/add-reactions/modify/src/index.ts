@@ -242,17 +242,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Filter to user messages — getMessagesSince includes is_from_me messages
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
+
   // Ensure all user messages are tracked — recovery messages enter processGroupMessages
   // directly via the queue, bypassing startMessageLoop where markReceived normally fires.
   // markReceived is idempotent (rejects duplicates), so this is safe for normal-path messages too.
-  for (const msg of missedMessages) {
+  for (const msg of userMessages) {
     statusTracker.markReceived(msg.id, chatJid, false);
   }
 
   // Mark all user messages as thinking (container is spawning)
-  const userMessages = missedMessages.filter(
-    (m) => !m.is_from_me && !m.is_bot_message,
-  );
   for (const msg of userMessages) {
     statusTracker.markThinking(msg.id);
   }
