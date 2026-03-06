@@ -1,23 +1,3 @@
-// Clamp setTimeout/setInterval to the max safe 32-bit signed integer to prevent
-// TimeoutOverflowWarning from Baileys' internal session key expiry timers (~365 days).
-const MAX_TIMER_MS = 0x7fff_ffff; // 2^31 - 1 ≈ 24.8 days
-const _origSetTimeout = globalThis.setTimeout;
-const _origSetInterval = globalThis.setInterval;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-globalThis.setTimeout = ((cb: any, ms?: number, ...args: any[]) =>
-  _origSetTimeout(
-    cb,
-    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
-    ...args,
-  )) as typeof setTimeout;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-globalThis.setInterval = ((cb: any, ms?: number, ...args: any[]) =>
-  _origSetInterval(
-    cb,
-    ms !== undefined && ms > MAX_TIMER_MS ? MAX_TIMER_MS : ms,
-    ...args,
-  )) as typeof setInterval;
-
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
@@ -46,9 +26,9 @@ import {
 import {
   getAllChats,
   getAllRegisteredGroups,
-  getMessageFromMe,
   getAllSessions,
   getAllTasks,
+  getMessageFromMe,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -63,8 +43,13 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  isSenderAllowed,
+  isTriggerAllowed,
+  loadSenderAllowlist,
+  shouldDropMessage,
+} from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { StatusTracker } from './status-tracker.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import {
@@ -82,6 +67,7 @@ import {
   emitAgentError,
   emitMessagePiped,
 } from './message-events.js';
+import { StatusTracker } from './status-tracker.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -90,11 +76,14 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 const agentCursors = new CursorManager();
+// Tracks cursor value before messages were piped to an active container.
+// Used to roll back if the container dies after piping.
+let cursorBeforePipe: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let statusTracker: StatusTracker;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -107,10 +96,10 @@ function loadState(): void {
   }
   const pipeCursor = getRouterState('cursor_before_pipe');
   try {
-    agentCursors.loadSavedAll(pipeCursor ? JSON.parse(pipeCursor) : {});
+    cursorBeforePipe = pipeCursor ? JSON.parse(pipeCursor) : {};
   } catch {
     logger.warn('Corrupted cursor_before_pipe in DB, resetting');
-    agentCursors.loadSavedAll({});
+    cursorBeforePipe = {};
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -123,10 +112,7 @@ function loadState(): void {
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(agentCursors.getAll()));
-  setRouterState(
-    'cursor_before_pipe',
-    JSON.stringify(agentCursors.getSavedAll()),
-  );
+  setRouterState('cursor_before_pipe', JSON.stringify(cursorBeforePipe));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -207,10 +193,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
+    const allowlistCfg = loadSenderAllowlist();
+    const hasTrigger = missedMessages.some(
+      (m) =>
+        TRIGGER_PATTERN.test(m.content.trim()) &&
+        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
+  }
+
+  // Ensure all user messages are tracked — recovery messages enter processGroupMessages
+  // directly via the queue, bypassing startMessageLoop where markReceived normally fires.
+  // markReceived is idempotent (rejects duplicates), so this is safe for normal-path messages too.
+  for (const msg of missedMessages) {
+    statusTracker.markReceived(msg.id, chatJid, false);
+  }
+
+  // Mark all user messages as thinking (container is spawning)
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
+  for (const msg of userMessages) {
+    statusTracker.markThinking(msg.id);
   }
 
   const prompt = formatMessages(missedMessages);
@@ -242,23 +246,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       queue.closeStdin(chatJid);
     }, IDLE_TIMEOUT);
   };
-
-  // Filter to user messages — getMessagesSince includes is_from_me messages
-  const userMessages = missedMessages.filter(
-    (m) => !m.is_from_me && !m.is_bot_message,
-  );
-
-  // Ensure all user messages are tracked — recovery messages enter processGroupMessages
-  // directly via the queue, bypassing startMessageLoop where markReceived normally fires.
-  // markReceived is idempotent (rejects duplicates), so this is safe for normal-path messages too.
-  for (const msg of userMessages) {
-    statusTracker.markReceived(msg.id, chatJid, false);
-  }
-
-  // Mark all user messages as thinking (container is spawning)
-  for (const msg of userMessages) {
-    statusTracker.markThinking(msg.id);
-  }
 
   await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
@@ -292,8 +279,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
-      statusTracker.markAllDone(chatJid);
       await emitAgentSuccess(chatJid);
+      statusTracker.markAllDone(chatJid);
       queue.notifyIdle(chatJid);
     }
 
@@ -310,8 +297,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (outputSentToUser) {
       // Output was sent for the initial batch, so don't roll those back.
       // But if messages were piped AFTER that output, roll back to recover them.
-      if (agentCursors.hasSaved(chatJid)) {
-        agentCursors.rollback(chatJid);
+      if (cursorBeforePipe[chatJid]) {
+        agentCursors.advance(chatJid, cursorBeforePipe[chatJid]);
+        delete cursorBeforePipe[chatJid];
         saveState();
         logger.warn(
           { group: group.name },
@@ -329,7 +317,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
     // No output sent — roll back everything so the full batch is retried
     agentCursors.advance(chatJid, previousCursor);
-    agentCursors.clearSaved(chatJid);
+    delete cursorBeforePipe[chatJid];
     saveState();
     logger.warn(
       { group: group.name },
@@ -340,7 +328,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // Success — clear pipe tracking (markAllDone already fired in streaming callback)
-  agentCursors.clearSaved(chatJid);
+  delete cursorBeforePipe[chatJid];
   saveState();
   return true;
 }
@@ -492,13 +480,17 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+            const allowlistCfg = loadSenderAllowlist();
+            const hasTrigger = groupMessages.some(
+              (m) =>
+                TRIGGER_PATTERN.test(m.content.trim()) &&
+                (m.is_from_me ||
+                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;
           }
 
-          // Mark each user message as received (main group only, status emoji)
+          // Mark each user message as received (status emoji)
           for (const msg of groupMessages) {
             if (!msg.is_from_me && !msg.is_bot_message) {
               statusTracker.markReceived(msg.id, chatJid, false);
@@ -517,6 +509,11 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            await emitMessagePiped(chatJid, messagesToSend.length);
+            logger.debug(
+              { chatJid, count: messagesToSend.length },
+              'Piped messages to active container',
+            );
             // Mark new user messages as thinking (only groupMessages were markReceived'd;
             // accumulated allPending context messages are untracked and would no-op)
             for (const msg of groupMessages) {
@@ -525,14 +522,9 @@ async function startMessageLoop(): Promise<void> {
               }
             }
             // Save cursor before first pipe so we can roll back if container dies
-            if (!agentCursors.hasSaved(chatJid)) {
-              agentCursors.save(chatJid);
+            if (!cursorBeforePipe[chatJid]) {
+              cursorBeforePipe[chatJid] = agentCursors.get(chatJid);
             }
-            await emitMessagePiped(chatJid, messagesToSend.length);
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
             agentCursors.advance(
               chatJid,
               messagesToSend[messagesToSend.length - 1].timestamp,
@@ -563,10 +555,11 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   // Roll back any piped-message cursors that were persisted before a crash.
+  // This ensures messages piped to a now-dead container are re-fetched.
+  // IMPORTANT: Only roll back if the container is no longer running — rolling
+  // back while the container is alive causes duplicate processing.
   let rolledBack = false;
-  for (const [chatJid, savedCursor] of Object.entries(
-    agentCursors.getSavedAll(),
-  )) {
+  for (const [chatJid, savedCursor] of Object.entries(cursorBeforePipe)) {
     if (queue.isActive(chatJid)) {
       logger.debug(
         { chatJid },
@@ -578,7 +571,8 @@ function recoverPendingMessages(): void {
       { chatJid, rolledBackTo: savedCursor },
       'Recovery: rolling back piped-message cursor',
     );
-    agentCursors.rollback(chatJid);
+    agentCursors.advance(chatJid, savedCursor);
+    delete cursorBeforePipe[chatJid];
     rolledBack = true;
   }
   if (rolledBack) {
@@ -615,10 +609,6 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
-    // Note: statusTracker placed after ch.disconnect for skill-combination merge
-    // compatibility (google-home uses the gap before ch.disconnect). Pending
-    // reaction sends use Promise.allSettled so disconnected-channel failures are
-    // swallowed — minor degradation only during shutdown.
     await statusTracker.shutdown();
     await runShutdownHooks();
     process.exit(0);
@@ -628,7 +618,25 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (chatJid: string, msg: NewMessage) => {
+      // Sender allowlist drop mode: discard messages from denied senders before storing
+      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+        const cfg = loadSenderAllowlist();
+        if (
+          shouldDropMessage(chatJid, cfg) &&
+          !isSenderAllowed(chatJid, msg.sender, cfg)
+        ) {
+          if (cfg.logDenied) {
+            logger.debug(
+              { chatJid, sender: msg.sender },
+              'sender-allowlist: dropping message (drop mode)',
+            );
+          }
+          return;
+        }
+      }
+      storeMessage(msg);
+    },
     onChatMetadata: (
       chatJid: string,
       timestamp: string,
@@ -639,22 +647,6 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect all registered channels.
-  // Each channel self-registers via the barrel import above.
-  // Factories return null when credentials are missing, so unconfigured channels are skipped.
-  for (const channelName of getRegisteredChannelNames()) {
-    const factory = getChannelFactory(channelName)!;
-    const channel = factory(channelOpts);
-    if (!channel) {
-      logger.warn(
-        { channel: channelName },
-        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
-      );
-      continue;
-    }
-    channels.push(channel);
-    await channel.connect();
-  }
   // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
   statusTracker = new StatusTracker({
     sendReaction: async (chatJid, messageKey, emoji) => {
@@ -674,6 +666,22 @@ async function main(): Promise<void> {
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
 
+  // Create and connect all registered channels.
+  // Each channel self-registers via the barrel import above.
+  // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  for (const channelName of getRegisteredChannelNames()) {
+    const factory = getChannelFactory(channelName)!;
+    const channel = factory(channelOpts);
+    if (!channel) {
+      logger.warn(
+        { channel: channelName },
+        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
+      );
+      continue;
+    }
+    channels.push(channel);
+    await channel.connect();
+  }
   await runChannelsReadyHooks(channels);
   if (channels.length === 0) {
     logger.fatal('No channels connected');
@@ -703,8 +711,6 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
     sendReaction: async (jid, emoji, messageId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
@@ -723,6 +729,8 @@ async function main(): Promise<void> {
         await channel.reactToLatestMessage(jid, emoji);
       }
     },
+    registeredGroups: () => registeredGroups,
+    registerGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels

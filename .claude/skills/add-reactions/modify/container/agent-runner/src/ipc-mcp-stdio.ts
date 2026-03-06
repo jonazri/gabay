@@ -73,9 +73,7 @@ server.tool(
   {
     emoji: z
       .string()
-      .describe(
-        'The emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\udd25")',
-      ),
+      .describe('The emoji to react with (e.g. "👍", "❤️", "🔥")'),
     message_id: z
       .string()
       .optional()
@@ -92,7 +90,9 @@ server.tool(
       groupFolder,
       timestamp: new Date().toISOString(),
     };
+
     writeIpcFile(MESSAGES_DIR, data);
+
     return {
       content: [
         { type: 'text' as const, text: `Reaction ${args.emoji} sent.` },

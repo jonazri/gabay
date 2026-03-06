@@ -19,7 +19,6 @@ export interface IpcDeps {
   ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
-  unregisterGroup?: (jid: string) => boolean;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -32,8 +31,8 @@ export interface IpcDeps {
   recoverPendingMessages?: () => void;
 }
 
-const RECOVERY_INTERVAL_MS = 60_000;
 let ipcWatcherRunning = false;
+const RECOVERY_INTERVAL_MS = 60_000;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -44,7 +43,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
-
   let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
