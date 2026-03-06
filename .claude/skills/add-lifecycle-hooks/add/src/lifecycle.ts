@@ -56,7 +56,9 @@ export async function runShutdownHooks(): Promise<void> {
   }
 }
 
-export async function runChannelsReadyHooks(channels: Channel[]): Promise<void> {
+export async function runChannelsReadyHooks(
+  channels: Channel[],
+): Promise<void> {
   for (const fn of channelsReadyHooks) {
     try {
       await fn(channels);
@@ -67,7 +69,14 @@ export async function runChannelsReadyHooks(channels: Channel[]): Promise<void> 
 }
 
 export function shouldProcessMessages(): boolean {
-  return processingGuards.every((fn) => fn());
+  return processingGuards.every((fn) => {
+    try {
+      return fn();
+    } catch (err) {
+      logger.error({ err }, 'Processing guard failed');
+      return false;
+    }
+  });
 }
 
 export async function runGuardLiftedHooks(): Promise<void> {
