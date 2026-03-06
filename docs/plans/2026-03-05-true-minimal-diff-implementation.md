@@ -1,12 +1,42 @@
 # True Minimal-Diff Overlays — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For Claude:** Use superpowers:subagent-driven-development. Tasks 1-5 are fully independent — dispatch them in parallel. Task 6 runs after all complete.
 
 **Goal:** Convert 5 full-file index.ts overlays (4,486 total lines) into true minimal-diff overlays (~943 lines) using a star topology where all downstream skills share `modify_base: lifecycle-hooks`.
 
 **Architecture:** lifecycle-hooks remains the sole full-file overlay (628 lines). Each downstream overlay contains only the lifecycle-hooks base file + that skill's unique additions. The merge engine computes `diff(lifecycle-hooks-overlay, downstream-overlay)` and applies just the unique additions to the accumulated state. A placement convention ensures insertions anchor to unique context lines so `git merge-file` never conflicts.
 
 **Tech Stack:** TypeScript, NanoClaw skill overlay system (`git merge-file` three-way merge), Vitest.
+
+---
+
+## How the merge engine works (READ THIS FIRST)
+
+The skill engine applies overlays using `git merge-file current base overlay`:
+
+- **current**: the file as it stands after all prior skills have been applied
+- **base**: the "common ancestor" — determines what counts as a change
+- **overlay**: the skill's version of the file
+
+The engine computes `diff(base, overlay)` (= what THIS skill changed relative to its base) and applies that diff to `current`. If the diff inserts at a location that hasn't been touched in `current`, the merge is clean.
+
+### What `modify_base: lifecycle-hooks` means
+
+When a manifest says `modify_base: { src/index.ts: lifecycle-hooks }`, the engine uses the lifecycle-hooks skill's overlay file (`.claude/skills/add-lifecycle-hooks/modify/src/index.ts`) as the base instead of the upstream snapshot.
+
+So: `diff(lifecycle-hooks-overlay, this-skill's-overlay)` = only THIS skill's unique additions. That diff gets applied to whatever `current` is (the accumulated state from all previously applied skills).
+
+### What makes overlays "minimal"
+
+A **minimal-diff overlay** = lifecycle-hooks overlay + ONLY this skill's unique additions. The diff between the lifecycle-hooks overlay and this skill's overlay should show ONLY lines this skill uniquely needs. No inherited state from other skills.
+
+### Why insertions must anchor to unique lines
+
+`git merge-file` conflicts when two diffs insert at the **exact same context line**. If skill A inserts after line 52 and skill B also inserts after line 52, conflict. If they insert after lines 52 and 53 respectively — clean merge. Minimum safe distance: **1 line apart**.
+
+### CRITICAL: Do NOT produce full-file overlays
+
+The current overlays are 628-859 lines each because they're full copies of the accumulated state. A true minimal overlay for google-home (which adds ~8 unique lines) should be 628 + 8 = ~636 lines, NOT 776 lines. If your overlay is within 30 lines of the lifecycle-hooks base (628), you're doing it right. If it's 700+ lines, you've accidentally included another skill's additions.
 
 ---
 
@@ -20,7 +50,14 @@ Task 4 (google-home)      ──┤
 Task 5 (shabbat-mode)     ──┘
 ```
 
-All 5 overlay tasks are independent — they all build from the same base (lifecycle-hooks). Task 6 validates the full chain.
+### Parallelization
+
+| Parallel Group | Tasks | Why parallel |
+|---|---|---|
+| **All overlays** | 1, 2, 3, 4, 5 | All build from the same base (lifecycle-hooks). Independent files. No shared state. |
+| **Validation** | 6 | Sequential — must run after all overlays complete |
+
+All 5 overlay tasks touch DIFFERENT skill directories (`.claude/skills/add-reactions/`, `.claude/skills/add-refresh-oauth/`, etc.). They can run simultaneously without conflicts.
 
 ---
 
@@ -524,15 +561,64 @@ git commit -m "feat(skills): true minimal-diff overlays — star topology (79% r
 
 ## Testing approach for each overlay
 
-Each overlay should be tested in isolation before the full validation. The process:
+Each overlay should be tested in isolation before the full validation:
 
-1. Set `installed-skills.yaml` to only: `lifecycle-hooks`, `whatsapp-types`, `whatsapp`, `ipc-handler-registry`, and the skill being tested
-2. Run `git checkout -- src/ && rm -rf .nanoclaw/base && npm run apply-skills`
-3. Verify: no conflicts, `npx tsc --noEmit` passes
-4. Restore `installed-skills.yaml`
+```bash
+# 1. Save current installed-skills.yaml
+cp .nanoclaw/installed-skills.yaml /tmp/orig-skills.yaml
+
+# 2. Set minimal skill list (lifecycle-hooks + prerequisites + the skill being tested)
+cat > .nanoclaw/installed-skills.yaml << 'EOF'
+skills:
+  - lifecycle-hooks
+  - whatsapp-types
+  - whatsapp
+  - ipc-handler-registry
+  - THE_SKILL_BEING_TESTED
+EOF
+
+# 3. Clean apply
+git checkout -- src/ && rm -rf .nanoclaw/base && npm run apply-skills
+
+# 4. Type check
+npx tsc --noEmit
+
+# 5. Restore
+cp /tmp/orig-skills.yaml .nanoclaw/installed-skills.yaml
+```
 
 This proves the overlay merges cleanly against the lifecycle-hooks base without depending on any other skill's index.ts changes.
 
-## Key constraint
+## Quality check: how to tell if your overlay is truly minimal
 
-Each skill's insertions MUST anchor to unique context lines (see placement convention in design doc). If two skills' insertions share an anchor line, `git merge-file` will conflict. The minimum safe distance is 1 line apart (experimentally verified).
+After building an overlay, run:
+```bash
+diff .claude/skills/add-lifecycle-hooks/modify/src/index.ts .claude/skills/YOUR_SKILL/modify/src/index.ts | grep "^[<>]" | wc -l
+```
+
+This shows the total diff lines between your overlay and the base. Compare against expected:
+
+| Skill | Expected diff lines |
+|---|---|
+| reactions | ~170 |
+| refresh-oauth | ~70 |
+| group-lifecycle | ~15 |
+| google-home | ~10 |
+| shabbat-mode | ~80 |
+
+If your diff is 200+ for google-home or group-lifecycle, you've accidentally included another skill's additions. Start over from `cp .claude/skills/add-lifecycle-hooks/modify/src/index.ts`.
+
+## Placement convention reference
+
+Each skill anchors its imports after a DIFFERENT upstream import line:
+
+| Skill | Anchor import after |
+|---|---|
+| lifecycle-hooks | `import { logger }` (L52) |
+| reactions | `import { startSchedulerLoop }` (L50) |
+| refresh-oauth | `import path from 'path'` (L2) |
+| group-lifecycle | `import { resolveGroupFolderPath }` (L41) |
+| google-home | `import { findChannel }` (L43) |
+| shabbat-mode | `import { Channel, NewMessage }` (L51) |
+
+This prevents `git merge-file` conflicts when multiple overlays add imports.
