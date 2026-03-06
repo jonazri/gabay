@@ -1,0 +1,15 @@
+skill: self-heal
+version: 1.0.0
+description: "IPC error recovery — notifies container agents of failures for triage and retry"
+core_version: 0.1.0
+adds:
+  - src/ipc-self-heal.ts
+  - src/ipc-self-heal.test.ts
+  - container/skills/self-heal/SKILL.md
+modifies:
+  - src/ipc.ts
+modify_base:
+  src/ipc.ts: ipc-handler-registry
+depends:
+  - ipc-handler-registry
+test: "npx vitest run src/ipc-self-heal.test.ts"
