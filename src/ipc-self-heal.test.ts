@@ -37,3 +37,39 @@ describe('writeIpcNotification', () => {
     expect(content.text).toContain('unknown_ipc_type');
   });
 });
+
+describe('writeIpcErrorResponse', () => {
+  beforeEach(() => {
+    testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-heal-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(testDataDir, { recursive: true, force: true });
+  });
+
+  it('writes error response to ipc/{group}/responses/{requestId}.json', async () => {
+    vi.resetModules();
+    const { writeIpcErrorResponse } = await import('./ipc-self-heal.js');
+
+    writeIpcErrorResponse('test-group', 'req-123', 'unknown_ipc_type', 'bad_type', 'No handler');
+
+    const responsePath = path.join(testDataDir, 'ipc', 'test-group', 'responses', 'req-123.json');
+    expect(fs.existsSync(responsePath)).toBe(true);
+
+    const content = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(content.status).toBe('error');
+    expect(content.error_code).toBe('unknown_ipc_type');
+    expect(content.ipc_type).toBe('bad_type');
+    expect(content.error).toBe('No handler');
+  });
+
+  it('skips writing when requestId is undefined', async () => {
+    vi.resetModules();
+    const { writeIpcErrorResponse } = await import('./ipc-self-heal.js');
+
+    writeIpcErrorResponse('test-group', undefined, 'handler_error', 'foo', 'Crash');
+
+    const responsesDir = path.join(testDataDir, 'ipc', 'test-group', 'responses');
+    expect(fs.existsSync(responsesDir)).toBe(false);
+  });
+});

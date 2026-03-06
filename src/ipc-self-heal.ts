@@ -44,3 +44,34 @@ export function writeIpcNotification(
     'IPC error notification written for agent',
   );
 }
+
+/**
+ * Write an error response to ipc/{group}/responses/{requestId}.json for IPC
+ * calls that include a requestId (e.g., google-home CLI tool polling pattern).
+ * No-op if requestId is undefined (fire-and-forget IPC calls).
+ */
+export function writeIpcErrorResponse(
+  sourceGroup: string,
+  requestId: string | undefined,
+  errorCode: IpcErrorCode,
+  ipcType: string,
+  errorMessage: string,
+): void {
+  if (!requestId) return;
+
+  const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+  fs.mkdirSync(responsesDir, { recursive: true });
+
+  const responseFile = path.join(responsesDir, `${requestId}.json`);
+  const tempFile = `${responseFile}.tmp`;
+  fs.writeFileSync(
+    tempFile,
+    JSON.stringify({
+      status: 'error',
+      error_code: errorCode,
+      ipc_type: ipcType,
+      error: errorMessage,
+    }),
+  );
+  fs.renameSync(tempFile, responseFile);
+}
