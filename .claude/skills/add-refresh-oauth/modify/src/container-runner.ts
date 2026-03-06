@@ -23,7 +23,7 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { AUTH_ERROR_PATTERN } from './oauth.js';
+import { AUTH_ERROR_PATTERN, readOAuthState } from './oauth.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -211,23 +211,36 @@ function buildVolumeMounts(
   return mounts;
 }
 
+const SECRET_KEYS = [
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'PERPLEXITY_API_KEY',
+] as const;
+
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
+ * Read allowed secrets for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * Token precedence:
+ * - Primary mode (normal): process.env wins over .env, so a long-lived token
+ *   set in .bashrc takes precedence over any short-lived refresh token in .env.
+ * - Fallback mode (primary token got a 401): .env wins, since it holds the
+ *   freshly-refreshed short-lived token from the OAuth recovery cycle.
+ *   process.env still has the dead primary token at this point.
  */
 function readSecrets(): Record<string, string> {
-  const keys = [
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
-    'ANTHROPIC_AUTH_TOKEN',
-  ];
-  const secrets = readEnvFile(keys);
-  // process.env takes precedence (e.g. bashrc token under systemd)
-  for (const key of keys) {
-    if (process.env[key]) secrets[key] = process.env[key]!;
+  const fromFile = readEnvFile([...SECRET_KEYS]);
+  if (readOAuthState().usingFallback) {
+    return fromFile;
   }
-  return secrets;
+  const result: Record<string, string> = { ...fromFile };
+  for (const key of SECRET_KEYS) {
+    const val = process.env[key];
+    if (val) result[key] = val;
+  }
+  return result;
 }
 
 function buildContainerArgs(

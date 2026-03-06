@@ -304,7 +304,7 @@ export async function ensureTokenFresh(): Promise<boolean> {
 export function refreshOAuthToken(): Promise<boolean> {
   const script = path.join(process.cwd(), 'scripts', 'oauth', 'refresh.sh');
   return new Promise((resolve) => {
-    execFile(script, { timeout: 60_000 }, (err) => {
+    execFile(script, { timeout: 90_000 }, (err) => {
       if (err) {
         logger.error({ err }, 'OAuth refresh script failed');
         resolve(false);
