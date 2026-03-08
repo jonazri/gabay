@@ -38,6 +38,16 @@ Phase 1 (all modify SKILL.md — sequential within phase):
   They CAN be parallelized if each agent targets only its section,
   but the safest approach is sequential (2 → 3 → 4 → 5).
 
+Phase 1 Feedback (from agent testing — all modify SKILL.md):
+
+  Task F1: Fix overdue summary count           (depends: 2, quick fix)
+  Task F2: Add weekly-plan                     (depends: 3, new function)
+  Task F3: Add reschedule-event                (depends: 7, new function)
+  Task F4: Improve substring search            (depends: 4, modify search functions)
+
+  All F tasks are independent of each other — can parallelize safely
+  (different functions in the same file). Complete before Phase 2.
+
 Phase 2 (multiple files — can parallelize):
 
   Task 9: Add deps to package.json            ← FOUNDATION
@@ -57,6 +67,99 @@ Phase 2 (multiple files — can parallelize):
 - Phase 1 Tasks 2-5: Low-risk parallel (different file sections)
 - Phase 2 Tasks 10+13: High-value parallel (different codebases: akiflow-sync vs rag-system)
 - Phase 2 Tasks 11+12: Medium-value parallel (both in akiflow-sync but different files)
+
+---
+
+## Phase 1 Feedback Tasks
+
+Discovered during agent testing after Phase 1 was implemented. All modify the same SKILL.md file.
+These should be completed before starting Phase 2.
+
+### Task F1: Fix overdue summary count
+
+**Files:**
+- Modify: `.claude/skills/add-akiflow-sync/add/container/skills/akiflow/SKILL.md` — `akiflow:list-overdue()` and `akiflow:daily-brief()`
+
+**Problem:** The summary header says "6 overdue tasks (JLI: 16, TTO: 10, ...)" — the "6" is wrong. The label counts sum to 47, which is the correct total. The "6" appears to be counting the number of label groups, not tasks.
+
+**Fix:** The SQL uses `count(*)` on the outer query which counts the grouped rows (one per label), not total tasks. Change the summary query to compute total count separately:
+```sql
+SELECT (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
+  || ' overdue tasks (' || group_concat(label_count, ', ') || ')'
+FROM (...)
+```
+
+**Test:** `akiflow:list-overdue` should show "47 overdue tasks (JLI: 16, ...)" not "6 overdue tasks".
+
+### Task F2: Add `akiflow:weekly-plan`
+
+**Files:**
+- Modify: `.claude/skills/add-akiflow-sync/add/container/skills/akiflow/SKILL.md`
+
+**Problem:** "Plan my week" still needs 7 calls. A consolidated weekly view (like `daily-brief` but for the week) would bring it down to 2.
+
+**Implementation:** New function that outputs:
+```
+=== Week of March 8-14, 2026 ===
+
+--- Events this week ---
+(list or "No meetings this week.")
+
+--- Events next week ---
+(list or "No meetings next week.")
+
+--- Tasks this week ---
+(list or "No tasks scheduled this week.")
+
+--- Overdue ---
+47 overdue (JLI: 16, TTO: 10, ...)
+
+--- Inbox ---
+4 unscheduled: ...
+```
+
+Pattern follows `daily-brief` but uses `this-week` and `next-week` date ranges.
+
+**Test:** `akiflow:weekly-plan` should return one consolidated view.
+
+### Task F3: Add `akiflow:reschedule-event`
+
+**Files:**
+- Modify: `.claude/skills/add-akiflow-sync/add/container/skills/akiflow/SKILL.md`
+
+**Problem:** `reschedule-task` exists but there's no equivalent for events. Agents must manually construct start/end JSON timestamps.
+
+**Implementation:**
+```bash
+akiflow:reschedule-event() {
+  # Usage: akiflow:reschedule-event <id> <YYYY-MM-DD>
+  # Reads the existing event to get the time-of-day and duration,
+  # then updates with the new date preserving the original time.
+  # 1. Get current event start/end from events table
+  # 2. Extract time portion (HH:MM:SS)
+  # 3. Combine new date + original time
+  # 4. Call akiflow:update-event with new start/end
+}
+```
+
+**Test:** `akiflow:reschedule-event <some-event-id> 2026-03-15` should show the dry-run with preserved time-of-day.
+
+### Task F4: Improve substring search to reduce false positives
+
+**Files:**
+- Modify: `.claude/skills/add-akiflow-sync/add/container/skills/akiflow/SKILL.md` — `akiflow:search-tasks()` and `akiflow:search-events()`
+
+**Problem:** Searching for "tax" matches "Tefillin Taxi" because LIKE `%tax%` is a pure substring match.
+
+**Fix:** For short keywords (3 chars or fewer), add word-boundary heuristics — match at start of title, after a space, or before a space:
+```sql
+(lower(title) LIKE '${term}%' OR lower(title) LIKE '% ${term}%' OR lower(title) LIKE '% ${term}')
+```
+For longer keywords (4+ chars), keep the current `%${term}%` substring match since false positives are rare.
+
+**Test:**
+- `akiflow:search-tasks 'tax'` should find "back taxes" but NOT "Tefillin Taxi"
+- `akiflow:search-tasks 'parsley'` should still find "Parsley Health" (long keyword, substring OK)
 
 ---
 
