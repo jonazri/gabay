@@ -299,12 +299,12 @@ akiflow:get-task() {
 }
 ```
 
-### Search tasks by title (case-insensitive substring)
+### Search tasks by title
 ```bash
 akiflow:search-tasks() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow:search-tasks '<query>'"
-    echo "Search active tasks by title (case-insensitive substring match)."
+    echo "Search active tasks by title (case-insensitive). Use | for OR: 'tax|IRS|filing'"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -313,12 +313,18 @@ akiflow:search-tasks() {
     return 1
   fi
   local query="$1"
-  local escaped_query
-  escaped_query=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
+  local where_clause=""
+  IFS='|' read -ra terms <<< "$query"
+  for term in "${terms[@]}"; do
+    local escaped
+    escaped=$(printf '%s' "$term" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
+    if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
+    where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
+  done
   _akiflow_query "No tasks match '$query'." "
     SELECT title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
-    WHERE lower(title) LIKE '%${escaped_query}%'
+    WHERE ($where_clause)
       AND done = 0 AND deleted_at IS NULL"
 }
 ```
@@ -633,6 +639,37 @@ Examples:
 akiflow:list-events today
 akiflow:list-events next-week
 akiflow:list-events 2026-03-15 2026-03-21
+```
+
+### Search events by title
+```bash
+akiflow:search-events() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:search-events '<query>'"
+    echo "Search events by title (case-insensitive). Use | for OR: 'standup|meeting'"
+    return 0
+  fi
+  if [[ -z "${1:-}" ]]; then
+    echo "Error: missing search query" >&2
+    echo "Usage: akiflow:search-events '<query>'" >&2
+    return 1
+  fi
+  local query="$1"
+  local where_clause=""
+  IFS='|' read -ra terms <<< "$query"
+  for term in "${terms[@]}"; do
+    local escaped
+    escaped=$(printf '%s' "$term" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
+    if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
+    where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
+  done
+  _akiflow_query "No events match '$query'." "
+    SELECT start, end, title, account,
+      CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
+    FROM events_view
+    WHERE ($where_clause)
+    ORDER BY start ASC"
+}
 ```
 
 ### Create an event
