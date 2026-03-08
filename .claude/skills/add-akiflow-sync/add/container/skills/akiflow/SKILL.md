@@ -964,6 +964,57 @@ akiflow:update-event() {
 }
 ```
 
+### Reschedule an event
+```bash
+akiflow:reschedule-event() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:reschedule-event <id> <YYYY-MM-DD>"
+    echo "Move an event to a new date, preserving the original time-of-day and duration."
+    return 0
+  fi
+  if [[ -z "${1:-}" || -z "${2:-}" ]]; then
+    echo "Error: missing id or date" >&2
+    echo "Usage: akiflow:reschedule-event <id> <YYYY-MM-DD>" >&2
+    return 1
+  fi
+  local id="$1" new_date="$2"
+  if ! [[ "$new_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "akiflow: invalid date: '$new_date' (expected YYYY-MM-DD)" >&2; return 1
+  fi
+  if ! [[ "$id" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]; then
+    echo "akiflow: invalid id: '$id'" >&2; return 1
+  fi
+
+  # Get current start/end from events table
+  local event_data
+  event_data=$(sqlite3 -json "$AKIFLOW_DB" "SELECT data FROM events WHERE id = '$id'")
+  if [[ -z "$event_data" || "$event_data" == "[]" ]]; then
+    echo "Error: event not found: $id" >&2
+    return 1
+  fi
+
+  local current_start current_end
+  current_start=$(echo "$event_data" | jq -r '.[0].data | fromjson | .start // empty')
+  current_end=$(echo "$event_data" | jq -r '.[0].data | fromjson | .end // empty')
+
+  if [[ -z "$current_start" || -z "$current_end" ]]; then
+    echo "Error: event $id has no start/end times" >&2
+    return 1
+  fi
+
+  # Extract time portions (everything after the T, or default to midnight)
+  local start_time end_time
+  start_time="${current_start#*T}"
+  end_time="${current_end#*T}"
+
+  # Build new start/end with new date + original time
+  local new_start="${new_date}T${start_time}"
+  local new_end="${new_date}T${end_time}"
+
+  akiflow:update-event "$id" "{\"start\": \"$new_start\", \"end\": \"$new_end\"}"
+}
+```
+
 ### Delete an event
 ```bash
 akiflow:delete-event() {
