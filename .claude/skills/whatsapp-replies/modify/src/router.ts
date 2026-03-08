@@ -1,4 +1,5 @@
 import { Channel, NewMessage } from './types.js';
+import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -9,8 +10,12 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatMessages(messages: NewMessage[]): string {
+export function formatMessages(
+  messages: NewMessage[],
+  timezone: string = 'UTC',
+): string {
   const lines = messages.map((m) => {
+    const displayTime = formatLocalTime(m.timestamp, timezone);
     const replyAttrs = m.replied_to_id
       ? ` replied_to_id="${escapeXml(m.replied_to_id)}" replied_to_sender="${escapeXml(m.replied_to_sender || '')}"`
       : '';
@@ -19,11 +24,11 @@ export function formatMessages(messages: NewMessage[]): string {
       : '';
     const content = `${replyTag}\n  ${escapeXml(m.content)}`.trimEnd();
     if (replyTag) {
-      return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${replyAttrs}>${content}\n</message>`;
+      return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${displayTime}"${replyAttrs}>${content}\n</message>`;
     }
-    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${replyAttrs}>${escapeXml(m.content)}</message>`;
+    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${displayTime}"${replyAttrs}>${escapeXml(m.content)}</message>`;
   });
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+  return `<context timezone="${timezone}" />\n<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

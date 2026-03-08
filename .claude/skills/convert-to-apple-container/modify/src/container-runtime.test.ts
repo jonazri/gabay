@@ -32,9 +32,12 @@ beforeEach(() => {
 // --- Pure functions ---
 
 describe('readonlyMountArgs', () => {
-  it('returns -v flag with readonly', () => {
+  it('returns --mount flag with readonly', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
-    expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+    expect(args).toEqual([
+      '--mount',
+      'type=bind,source=/host/path,target=/container/path,readonly',
+    ]);
   });
 });
 
@@ -55,10 +58,13 @@ describe('ensureContainerRuntimeRunning', () => {
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} info`, {
-      stdio: 'pipe',
-      timeout: 10000,
-    });
+    expect(mockExecSync).toHaveBeenCalledWith(
+      `${CONTAINER_RUNTIME_BIN} system status`,
+      {
+        stdio: 'pipe',
+        timeout: 10000,
+      },
+    );
     expect(logger.debug).toHaveBeenCalledWith(
       'Container runtime already running',
     );

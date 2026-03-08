@@ -133,7 +133,7 @@ describe('add-image-vision skill package', () => {
     });
 
     it('includes image processing block', () => {
-      expect(content).toContain('processImage(buffer');
+      expect(content).toMatch(/processImage\(\s*buffer/);
       expect(content).toContain('Image - download failed');
     });
 
@@ -242,7 +242,7 @@ describe('add-image-vision skill package', () => {
     it('passes imageAttachments to runAgent', () => {
       expect(content).toContain('imageAttachments');
       expect(content).toMatch(
-        /runAgent\(group,\s*prompt,\s*chatJid,\s*imageAttachments/,
+        /runAgent\(\s*group,\s*prompt,\s*chatJid,\s*imageAttachments/,
       );
     });
 

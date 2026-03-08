@@ -61,8 +61,9 @@ describe('formatMessages', () => {
   it('formats a single message as XML', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
-      '<messages>\n' +
-        '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+      '<context timezone="UTC" />\n' +
+        '<messages>\n' +
+        '<message id="1" sender="Alice" time="Jan 1, 2024, 12:00 AM">hello</message>\n' +
         '</messages>',
     );
   });
@@ -117,7 +118,9 @@ describe('formatMessages', () => {
 
   it('handles empty array', () => {
     const result = formatMessages([]);
-    expect(result).toBe('<messages>\n\n</messages>');
+    expect(result).toBe(
+      '<context timezone="UTC" />\n<messages>\n\n</messages>',
+    );
   });
 
   it('includes reply context as nested XML when present', () => {

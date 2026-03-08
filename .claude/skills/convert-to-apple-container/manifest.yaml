@@ -1,5 +1,5 @@
 skill: convert-to-apple-container
-version: 1.1.0
+version: 1.0.0
 description: "Switch container runtime from Docker to Apple Container (macOS)"
 core_version: 0.1.0
 adds: []
