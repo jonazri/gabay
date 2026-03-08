@@ -14,6 +14,52 @@
 
 ---
 
+## Dependency Graph
+
+```
+Phase 1 (all modify SKILL.md — sequential within phase):
+
+  Task 1: Helper functions + empty messages  ← FOUNDATION
+    ├─→ Task 2: list-overdue + fix list-today  (depends: 1)
+    ├─→ Task 3: daily-brief                    (depends: 1)
+    ├─→ Task 4: multi-keyword + search-events  (depends: 1)
+    └─→ Task 5: stats                          (depends: 1)
+           │
+           ▼
+         Task 6: --format json + --limit flags (depends: 1-5, modifies _akiflow_query)
+           │
+           ▼
+         Task 7: reschedule-task + help text   (depends: 1)
+           │
+           ▼
+         Task 8: Phase 1 validation            (depends: 1-7)
+
+  NOTE: Tasks 2-5 touch DIFFERENT SECTIONS of the same file.
+  They CAN be parallelized if each agent targets only its section,
+  but the safest approach is sequential (2 → 3 → 4 → 5).
+
+Phase 2 (multiple files — can parallelize):
+
+  Task 9: Add deps to package.json            ← FOUNDATION
+    ├─→ Task 10: Create indexer module         (depends: 9)
+    │     ├─→ Task 11: Hook into sync pipeline (depends: 10)
+    │     └─→ Task 12: Backfill script         (depends: 10, parallel with 11)
+    └─→ Task 13: RAG search endpoint           (depends: 9, parallel with 10-12)
+           │
+           ▼
+         Task 14: akiflow:search bash function (depends: 13)
+           │
+           ▼
+         Task 15: Final validation + cleanup   (depends: 8, 11, 12, 14)
+```
+
+**Parallelization opportunities:**
+- Phase 1 Tasks 2-5: Low-risk parallel (different file sections)
+- Phase 2 Tasks 10+13: High-value parallel (different codebases: akiflow-sync vs rag-system)
+- Phase 2 Tasks 11+12: Medium-value parallel (both in akiflow-sync but different files)
+
+---
+
 ## Phase 1: CLI Tool Improvements
 
 All Phase 1 tasks modify a single file:
