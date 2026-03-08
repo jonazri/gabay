@@ -1008,8 +1008,8 @@ akiflow:reschedule-event() {
   fi
 
   local current_start current_end
-  current_start=$(echo "$event_data" | jq -r '.[0].data | fromjson | .start // empty')
-  current_end=$(echo "$event_data" | jq -r '.[0].data | fromjson | .end // empty')
+  current_start=$(echo "$event_data" | jq -r '.[0].data | fromjson | .start_time // empty')
+  current_end=$(echo "$event_data" | jq -r '.[0].data | fromjson | .end_time // empty')
 
   if [[ -z "$current_start" || -z "$current_end" ]]; then
     echo "Error: event $id has no start/end times" >&2
@@ -1025,7 +1025,7 @@ akiflow:reschedule-event() {
   local new_start="${new_date}T${start_time}"
   local new_end="${new_date}T${end_time}"
 
-  akiflow:update-event "$id" "{\"start\": \"$new_start\", \"end\": \"$new_end\"}"
+  akiflow:update-event "$id" "{\"start_time\": \"$new_start\", \"end_time\": \"$new_end\"}"
 }
 ```
 
