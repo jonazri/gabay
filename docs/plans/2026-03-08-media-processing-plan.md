@@ -1,12 +1,43 @@
 # Media Processing Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to execute this plan. Dispatch parallel agents where dependencies allow.
 
 **Goal:** Install image vision and PDF reader as skills using a shared media-processing foundation, avoiding whatsapp.ts overlay conflicts.
 
 **Architecture:** Three layered skills — `media-processing` (foundation with whatsapp.ts hook), `image-vision` (reworked to overlay media-processing.ts instead of whatsapp.ts), `pdf-reader` (reworked the same way). See `docs/plans/2026-03-08-media-processing-design.md` for rationale.
 
 **Tech Stack:** TypeScript, Baileys (WhatsApp), sharp (image resize), poppler-utils (PDF extraction), Claude Agent SDK (multimodal)
+
+## Dependency Graph & Parallel Execution
+
+```
+Wave 1 (parallel):  T1, T5, T8     — independent scaffolding
+Wave 2 (parallel):  T2, T3          — depend on T1
+                    T6              — depends on T2 + T5
+                    T9              — depends on T2 + T8
+Wave 3 (parallel):  T4, T7, T10    — test suites (depend on their skill's files)
+Wave 4 (serial):    T11            — update installed-skills.yaml
+Wave 5 (serial):    T12            — full apply-skills test
+Wave 6 (serial):    T13            — install deps + build
+Wave 7 (serial):    T14            — manual verification
+```
+
+| Task | Depends On | Can Parallel With |
+|------|-----------|-------------------|
+| T1: media-processing manifest | — | T5, T8 |
+| T2: media-processing module | T1 | T3 |
+| T3: whatsapp.ts overlay | T1 | T2 |
+| T4: media-processing tests | T1, T2, T3 | T7, T10 |
+| T5: image-vision manifest+cleanup | — | T1, T8 |
+| T6: image-vision media-proc overlay | T2, T5 | T9 |
+| T7: image-vision tests | T5, T6 | T4, T10 |
+| T8: pdf-reader manifest+cleanup | — | T1, T5 |
+| T9: pdf-reader media-proc overlay | T2, T8 | T6 |
+| T10: pdf-reader tests | T8, T9 | T4, T7 |
+| T11: installed-skills.yaml | T4, T7, T10 | — |
+| T12: full apply-skills test | T11 | — |
+| T13: install + build | T12 | — |
+| T14: manual verification | T13 | — |
 
 ---
 
