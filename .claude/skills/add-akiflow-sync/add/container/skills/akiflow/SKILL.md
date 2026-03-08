@@ -398,6 +398,8 @@ akiflow:create-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow:create-task '<json>'"
     echo "Create a new task. Required: title. Optional: status (1=inbox,2=planned,7=someday), date, datetime, duration, priority (0-4), listId, tags_ids, description, origin_url."
+    echo "Status codes: 1=inbox, 2=planned, 3=completed, 4=snoozed, 5=archived, 6=deleted, 7=someday"
+    echo "Priority: 0=none, 1=low, 2=medium, 3=high, 4=goal"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -452,6 +454,8 @@ akiflow:update-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow:update-task <id> '<json>'"
     echo "Update a task. Pass the task UUID and a partial JSON object with fields to change."
+    echo "Status codes: 1=inbox, 2=planned, 3=completed, 4=snoozed, 5=archived, 6=deleted, 7=someday"
+    echo "Priority: 0=none, 1=low, 2=medium, 3=high, 4=goal"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -512,6 +516,27 @@ akiflow:update-task "task-uuid" '{"priority": 3}'
 
 # Move to someday
 akiflow:update-task "task-uuid" '{"status": 7, "date": null, "datetime": null}'
+```
+
+### Reschedule a task
+```bash
+akiflow:reschedule-task() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:reschedule-task <id> <YYYY-MM-DD>"
+    echo "Move a task to a new date. Sets status to planned and clears datetime."
+    return 0
+  fi
+  if [[ -z "${1:-}" || -z "${2:-}" ]]; then
+    echo "Error: missing id or date" >&2
+    echo "Usage: akiflow:reschedule-task <id> <YYYY-MM-DD>" >&2
+    return 1
+  fi
+  local id="$1" date="$2"
+  if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "akiflow: invalid date: '$date' (expected YYYY-MM-DD)" >&2; return 1
+  fi
+  akiflow:update-task "$id" "{\"date\": \"$date\", \"status\": 2, \"datetime\": null}"
+}
 ```
 
 ### Complete a task
@@ -987,3 +1012,5 @@ akiflow:sync-status() {
 - Recurring events are read-only — `update-event` and `delete-event` only affect single instances. To change a recurring series, the user must edit it in Akiflow directly.
 - Use `akiflow:sync-status` to check if the daemon is running and writes are being processed
 - Reads are instant (local SQLite); writes are queued and synced automatically by the daemon
+- All `datetime` values are ISO 8601 UTC (ending in `Z`). The `TZ` env var is set to the user's local timezone for display formatting.
+- `duration` is in minutes (e.g., `30` = 30 minutes).
