@@ -110,7 +110,8 @@ akiflow:daily-brief() {
   echo "--- Overdue ---"
   local overdue
   overdue=$(sqlite3 "$AKIFLOW_DB" "
-    SELECT count(*) || ' overdue (' ||
+    SELECT (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
+      || ' overdue (' ||
       COALESCE(group_concat(lc, ', '), 'none') || ')'
     FROM (
       SELECT COALESCE(NULLIF(org,''), 'Other') || ': ' || count(*) as lc
@@ -233,8 +234,8 @@ akiflow:list-overdue() {
   # Summary line
   local counts
   counts=$(sqlite3 "$AKIFLOW_DB" "
-    SELECT count(*) || ' overdue tasks (' ||
-      group_concat(label_count, ', ') || ')'
+    SELECT (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
+      || ' overdue tasks (' || group_concat(label_count, ', ') || ')'
     FROM (
       SELECT COALESCE(NULLIF(org,''), 'Other') || ': ' || count(*) as label_count
       FROM tasks_display
