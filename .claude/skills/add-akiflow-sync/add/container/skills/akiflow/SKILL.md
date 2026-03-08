@@ -40,6 +40,33 @@ Full task and calendar management via a local SQLite database kept in sync by th
 
 The `AKIFLOW_DB` environment variable points to the local SQLite database maintained by the akiflow-sync daemon. Reads are instant; writes are queued via `pending_writes` and synced to the server automatically.
 
+## Helpers
+
+```bash
+# Internal: run sqlite3 query, print message if empty
+_akiflow_query() {
+  local msg="$1"; shift
+  local result
+  result=$(sqlite3 -markdown "$AKIFLOW_DB" "$@")
+  if [[ -z "$result" ]]; then
+    echo "$msg"
+  else
+    echo "$result"
+  fi
+}
+
+_akiflow_query_json() {
+  local msg="$1"; shift
+  local result
+  result=$(sqlite3 -json "$AKIFLOW_DB" "$@")
+  if [[ -z "$result" || "$result" == "[]" ]]; then
+    echo "$msg"
+  else
+    echo "$result"
+  fi
+}
+```
+
 ## Tasks
 
 ### List all active tasks
@@ -50,8 +77,8 @@ akiflow:list-all() {
     echo "List all active tasks (inbox, planned, snoozed, someday)."
     return 0
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, status, label, org, scheduled_date, datetime, priority, links, id
+  _akiflow_query "No active tasks found." "
+    SELECT title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
     WHERE done = 0 AND deleted_at IS NULL
       AND status IN ('inbox','planned','snoozed','someday')
@@ -67,8 +94,8 @@ akiflow:list-inbox() {
     echo "List inbox tasks (unscheduled)."
     return 0
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, label, org, priority, links, id
+  _akiflow_query "No inbox tasks." "
+    SELECT title, label, org, priority, id
     FROM tasks_display
     WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL
     ORDER BY sorting ASC"
@@ -85,9 +112,9 @@ akiflow:list-today() {
   fi
   local today
   today=$(date +%Y-%m-%d)
-  sqlite3 -markdown "$AKIFLOW_DB" "
+  _akiflow_query "No tasks scheduled for today." "
     SELECT CASE WHEN scheduled_date < '$today' THEN 'OVERDUE' ELSE 'today' END AS due,
-      title, status, label, org, scheduled_date, datetime, priority, links, id
+      title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
     WHERE scheduled_date <= '$today'
       AND done = 0 AND deleted_at IS NULL
@@ -110,8 +137,8 @@ akiflow:list-upcoming() {
   local end_date today
   end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d)
   today=$(date +%Y-%m-%d)
-  sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, status, label, org, scheduled_date, datetime, priority, links, id
+  _akiflow_query "No tasks in the next $days days." "
+    SELECT title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
     WHERE done = 0 AND deleted_at IS NULL
       AND scheduled_date >= '$today'
@@ -128,8 +155,8 @@ akiflow:list-someday() {
     echo "List someday tasks (no date, no active pressure)."
     return 0
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, label, org, priority, links, id
+  _akiflow_query "No someday tasks." "
+    SELECT title, label, org, priority, id
     FROM tasks_display
     WHERE status = 'someday' AND done = 0 AND deleted_at IS NULL
     ORDER BY sorting ASC"
@@ -179,8 +206,8 @@ akiflow:search-tasks() {
   local query="$1"
   local escaped_query
   escaped_query=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
-  sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, status, label, org, scheduled_date, datetime, priority, links, id
+  _akiflow_query "No tasks match '$query'." "
+    SELECT title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
     WHERE lower(title) LIKE '%${escaped_query}%'
       AND done = 0 AND deleted_at IS NULL"
@@ -417,7 +444,7 @@ akiflow:list-labels() {
     echo "List all labels (projects and tags)."
     return 0
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
+  _akiflow_query "No labels found." "
     SELECT title, color, is_tag, folder_id, id
     FROM labels_view
     WHERE deleted_at IS NULL
@@ -437,7 +464,7 @@ akiflow:list-calendars() {
     echo "List all calendars."
     return 0
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
+  _akiflow_query "No calendars found." "
     SELECT title, color, id
     FROM calendars_view
     WHERE deleted_at IS NULL"
@@ -482,7 +509,7 @@ akiflow:list-events() {
       fi ;;
   esac
 
-  sqlite3 -markdown "$AKIFLOW_DB" "
+  _akiflow_query "No events found for $start to $end." "
     SELECT start, end, title, account, CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
     FROM events_view
     WHERE start >= '$start' AND start < date('$end', '+1 day')
@@ -643,7 +670,7 @@ akiflow:list-slots() {
     echo "List all time slots."
     return 0
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
+  _akiflow_query "No time slots found." "
     SELECT title, date, start, end, id
     FROM time_slots_view
     WHERE deleted_at IS NULL"
@@ -662,7 +689,7 @@ akiflow:list-slots-today() {
   if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     echo "akiflow: invalid date: '$date' (expected YYYY-MM-DD)" >&2; return 1
   fi
-  sqlite3 -markdown "$AKIFLOW_DB" "
+  _akiflow_query "No time slots for $date." "
     SELECT title, date, start, end, id
     FROM time_slots_view
     WHERE deleted_at IS NULL
