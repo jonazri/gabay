@@ -107,18 +107,57 @@ akiflow:list-inbox() {
 akiflow:list-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow:list-today"
-    echo "List tasks scheduled for today and overdue tasks."
+    echo "List tasks scheduled for today."
     return 0
   fi
   local today
   today=$(date +%Y-%m-%d)
-  _akiflow_query "No tasks scheduled for today." "
-    SELECT CASE WHEN scheduled_date < '$today' THEN 'OVERDUE' ELSE 'today' END AS due,
-      title, status, label, org, scheduled_date, datetime, priority, id
+  _akiflow_query "No tasks scheduled for today. (Use akiflow:list-overdue for past-due tasks.)" "
+    SELECT title, status, label, org, datetime, priority, id
     FROM tasks_display
-    WHERE scheduled_date <= '$today'
+    WHERE scheduled_date = '$today'
       AND done = 0 AND deleted_at IS NULL
-    ORDER BY due DESC, datetime ASC, sorting ASC"
+    ORDER BY datetime ASC, sorting ASC"
+}
+```
+
+### List overdue tasks
+```bash
+akiflow:list-overdue() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:list-overdue [--limit N]"
+    echo "List tasks with scheduled dates in the past."
+    return 0
+  fi
+  local limit=""
+  if [[ "${1:-}" == "--limit" && -n "${2:-}" ]]; then limit="LIMIT $2"; fi
+  local today
+  today=$(date +%Y-%m-%d)
+  # Summary line
+  local counts
+  counts=$(sqlite3 "$AKIFLOW_DB" "
+    SELECT count(*) || ' overdue tasks (' ||
+      group_concat(label_count, ', ') || ')'
+    FROM (
+      SELECT COALESCE(NULLIF(org,''), 'Other') || ': ' || count(*) as label_count
+      FROM tasks_display
+      WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL
+      GROUP BY COALESCE(NULLIF(org,''), 'Other')
+      ORDER BY count(*) DESC
+    )")
+  if [[ "$counts" == *"0 overdue"* || -z "$counts" ]]; then
+    echo "No overdue tasks."
+    return 0
+  fi
+  echo "$counts"
+  echo ""
+  _akiflow_query "No overdue tasks." "
+    SELECT title, label, org, scheduled_date, priority, id
+    FROM tasks_display
+    WHERE scheduled_date < '$today'
+      AND done = 0 AND deleted_at IS NULL
+    ORDER BY scheduled_date ASC, sorting ASC
+    $limit"
 }
 ```
 
