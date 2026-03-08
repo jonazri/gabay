@@ -119,6 +119,18 @@ async function processBatch(
         text: formatTaskText(row),
       });
     }
+
+    // Tombstone tasks not found in tasks_display (hard-deleted)
+    const foundTaskIds = new Set(rows.map((r) => String(r.id)));
+    const missingTaskIds = ids.filter((id) => !foundTaskIds.has(id));
+    for (const id of missingTaskIds) {
+      try {
+        await qdrant.setPayload(COLLECTION, {
+          points: [pointId('task', id)],
+          payload: { deleted: true, updated_at: Date.now() },
+        });
+      } catch { /* point may not exist yet */ }
+    }
   } else if (table === 'events') {
     const placeholders = ids.map(() => '?').join(',');
     const rows = db.prepare(`
@@ -145,6 +157,18 @@ async function processBatch(
         },
         text: formatEventText(row),
       });
+    }
+
+    // Tombstone events not found in events_view (deleted/cancelled/declined)
+    const foundEventIds = new Set(rows.map((r) => String(r.id)));
+    const missingEventIds = ids.filter((id) => !foundEventIds.has(id));
+    for (const id of missingEventIds) {
+      try {
+        await qdrant.setPayload(COLLECTION, {
+          points: [pointId('event', id)],
+          payload: { deleted: true, updated_at: Date.now() },
+        });
+      } catch { /* point may not exist yet */ }
     }
   }
 
