@@ -52,7 +52,7 @@ _akiflow_query() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format) format="$2"; shift 2 ;;
-      --limit) limit="LIMIT $2"; shift 2 ;;
+      --limit) if [[ "$2" =~ ^[0-9]+$ ]]; then limit="LIMIT $2"; else echo "akiflow: invalid --limit: '$2' (expected number)" >&2; return 1; fi; shift 2 ;;
       *) shift ;;
     esac
   done
