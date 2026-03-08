@@ -358,8 +358,10 @@ akiflow:list-upcoming() {
     echo "List tasks scheduled within the next N days (default: 7, max: 365)."
     return 0
   fi
-  local days="${1:-7}"
-  shift 2>/dev/null || true
+  local days=7
+  if [[ $# -gt 0 && "$1" != --* ]]; then
+    days="$1"; shift
+  fi
   if ! [[ "$days" =~ ^[0-9]+$ ]] || (( days < 1 || days > 365 )); then
     echo "akiflow: days must be a number between 1 and 365" >&2; return 1
   fi
@@ -457,8 +459,11 @@ akiflow:search-tasks() {
   local where_clause=""
   IFS='|' read -ra terms <<< "$query"
   for term in "${terms[@]}"; do
+    local trimmed
+    trimmed=$(printf '%s' "$term" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$trimmed" ]] && continue
     local escaped
-    escaped=$(printf '%s' "$term" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
+    escaped=$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
     if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
     if [[ ${#escaped} -le 3 ]]; then
       # Short keyword: word-boundary match (space or start/end) to reduce false positives.
@@ -865,8 +870,11 @@ akiflow:search-events() {
   local where_clause=""
   IFS='|' read -ra terms <<< "$query"
   for term in "${terms[@]}"; do
+    local trimmed
+    trimmed=$(printf '%s' "$term" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$trimmed" ]] && continue
     local escaped
-    escaped=$(printf '%s' "$term" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
+    escaped=$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
     if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
     if [[ ${#escaped} -le 3 ]]; then
       # Short keyword: word-boundary match (space or start/end) to reduce false positives.
@@ -1023,14 +1031,30 @@ akiflow:reschedule-event() {
     return 1
   fi
 
-  # Extract time portions (everything after the T, or default to midnight)
-  local start_time end_time
+  # Extract date and time portions
+  local start_date start_time end_date end_time
+  start_date="${current_start%%T*}"
   start_time="${current_start#*T}"
+  end_date="${current_end%%T*}"
   end_time="${current_end#*T}"
 
-  # Build new start/end with new date + original time
+  # Compute day offset between original start and end (handles midnight-crossing events)
+  local day_offset=0
+  if [[ "$start_date" != "$end_date" ]]; then
+    local s_epoch e_epoch
+    s_epoch=$(date -d "$start_date" +%s 2>/dev/null)
+    e_epoch=$(date -d "$end_date" +%s 2>/dev/null)
+    day_offset=$(( (e_epoch - s_epoch) / 86400 ))
+  fi
+
   local new_start="${new_date}T${start_time}"
-  local new_end="${new_date}T${end_time}"
+  local new_end_date
+  if (( day_offset > 0 )); then
+    new_end_date=$(date -d "$new_date +${day_offset} days" +%Y-%m-%d 2>/dev/null)
+  else
+    new_end_date="$new_date"
+  fi
+  local new_end="${new_end_date}T${end_time}"
 
   akiflow:update-event "$id" "{\"start_time\": \"$new_start\", \"end_time\": \"$new_end\"}"
 }
@@ -1103,8 +1127,12 @@ akiflow:list-slots-today() {
     echo "List time slots for a specific date (default: today)."
     return 0
   fi
-  local date="${1:-$(date +%Y-%m-%d)}"
-  shift 2>/dev/null || true
+  local date
+  if [[ $# -gt 0 && "$1" != --* ]]; then
+    date="$1"; shift
+  else
+    date="$(date +%Y-%m-%d)"
+  fi
   if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     echo "akiflow: invalid date: '$date' (expected YYYY-MM-DD)" >&2; return 1
   fi
