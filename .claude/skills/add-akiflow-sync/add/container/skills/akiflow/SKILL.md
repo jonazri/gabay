@@ -755,14 +755,21 @@ Response fields: `id`, `title`, `color` (hex), `is_tag` (0=project, 1=tag), `fol
 ```bash
 akiflow:list-calendars() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-calendars"
+    echo "Usage: akiflow:list-calendars [--format json] [--limit N]"
     echo "List all calendars."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No calendars found." "
     SELECT title, color, id
     FROM calendars_view
-    WHERE deleted_at IS NULL"
+    WHERE deleted_at IS NULL" "${flags[@]}"
 }
 ```
 
