@@ -37,7 +37,8 @@ export async function akiflowSearch(
   db: Database.Database | null,
   req: SearchRequest,
 ): Promise<{ results: SearchResult[]; total: number }> {
-  const limit = Math.min(req.limit || 10, 50);
+  const rawLimit = Number(req.limit) || 10;
+  const limit = Math.min(Math.max(Math.trunc(rawLimit), 1), 50);
   const filters = req.filters || {};
 
   // Build Qdrant filter
@@ -88,6 +89,12 @@ export async function akiflowSearch(
       });
       const whereKeyword = likeClauses.join(' OR ');
 
+      // Build extra filter clauses for keyword SQL
+      const taskFilterClauses: string[] = [];
+      const taskFilterParams: unknown[] = [];
+      if (filters.label) { taskFilterClauses.push('AND label = ?'); taskFilterParams.push(filters.label); }
+      if (filters.org) { taskFilterClauses.push('AND org = ?'); taskFilterParams.push(filters.org); }
+
       // Search tasks
       if (filters.entity_type !== 'event') {
         const taskRows = db.prepare(`
@@ -96,9 +103,10 @@ export async function akiflowSearch(
           FROM tasks_display
           WHERE (${whereKeyword})
             AND done = 0 AND deleted_at IS NULL
+            ${taskFilterClauses.join(' ')}
           GROUP BY title
           LIMIT ${limit * 4}
-        `).all() as Record<string, unknown>[];
+        `).all(...taskFilterParams) as Record<string, unknown>[];
 
         for (const row of taskRows) {
           const titleLower = String(row.title).toLowerCase();
