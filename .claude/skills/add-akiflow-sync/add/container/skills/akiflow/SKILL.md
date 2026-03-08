@@ -69,6 +69,76 @@ _akiflow_query_json() {
 
 ## Tasks
 
+### Daily brief (consolidated today view)
+```bash
+akiflow:daily-brief() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:daily-brief"
+    echo "Show today's events, tasks, overdue summary, and inbox in one view."
+    return 0
+  fi
+  local today today_display
+  today=$(date +%Y-%m-%d)
+  today_display=$(date +"%A, %B %-d, %Y")
+  echo "=== Today: $today_display ==="
+  echo ""
+
+  # Events
+  echo "--- Events ---"
+  local events
+  events=$(sqlite3 -markdown "$AKIFLOW_DB" "
+    SELECT start, end, title, account, id
+    FROM events_view
+    WHERE start >= '$today' AND start < date('$today', '+1 day')
+    ORDER BY start ASC")
+  if [[ -z "$events" ]]; then echo "No meetings today."; else echo "$events"; fi
+  echo ""
+
+  # Today's tasks
+  echo "--- Tasks ---"
+  local tasks
+  tasks=$(sqlite3 -markdown "$AKIFLOW_DB" "
+    SELECT title, label, org, datetime, priority, id
+    FROM tasks_display
+    WHERE scheduled_date = '$today' AND done = 0 AND deleted_at IS NULL
+    ORDER BY datetime ASC, sorting ASC")
+  if [[ -z "$tasks" ]]; then echo "No tasks scheduled for today."; else echo "$tasks"; fi
+  echo ""
+
+  # Overdue summary
+  echo "--- Overdue ---"
+  local overdue
+  overdue=$(sqlite3 "$AKIFLOW_DB" "
+    SELECT count(*) || ' overdue (' ||
+      COALESCE(group_concat(lc, ', '), 'none') || ')'
+    FROM (
+      SELECT COALESCE(NULLIF(org,''), 'Other') || ': ' || count(*) as lc
+      FROM tasks_display
+      WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL
+      GROUP BY COALESCE(NULLIF(org,''), 'Other')
+      ORDER BY count(*) DESC
+    )")
+  if [[ "$overdue" == *"0 overdue"* ]]; then echo "No overdue tasks."; else echo "$overdue"; fi
+  echo ""
+
+  # Inbox
+  echo "--- Inbox ---"
+  local inbox
+  inbox=$(sqlite3 "$AKIFLOW_DB" "
+    SELECT count(*) FROM tasks_display
+    WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL")
+  if [[ "$inbox" == "0" ]]; then
+    echo "Inbox empty."
+  else
+    echo "$inbox unscheduled:"
+    sqlite3 "$AKIFLOW_DB" "
+      SELECT '- ' || title FROM tasks_display
+      WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL
+      ORDER BY sorting ASC"
+  fi
+}
+```
+
 ### List all active tasks
 ```bash
 akiflow:list-all() {
