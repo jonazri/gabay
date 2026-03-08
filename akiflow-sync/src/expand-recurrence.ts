@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import rrulePkg from 'rrule';
 const { RRule, rrulestr } = rrulePkg;
+import { markForReindex } from './indexer.js';
 import { logger } from './logger.js';
 
 /** Rolling window: expand recurring events from MONTHS_BACK to MONTHS_AHEAD. */
@@ -230,6 +231,10 @@ export function expandRecurringEvents(db: Database.Database): void {
 
   if (allRows.length > 0) {
     insertMany(allRows);
+    // Mark expanded instances for vector re-indexing
+    for (const row of allRows) {
+      markForReindex('events', String(row[0])); // row[0] is the instance_id
+    }
   }
 
   logger.info(

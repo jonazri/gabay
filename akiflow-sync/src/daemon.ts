@@ -8,6 +8,7 @@ import { syncV5Entity } from './sync/v5.js';
 import { syncV3Entity } from './sync/v3.js';
 import { startPendingWritePoller } from './pending.js';
 import { expandRecurringEvents } from './expand-recurrence.js';
+import { startIndexer } from './indexer.js';
 import { logger } from './logger.js';
 import type { Channel, Options } from 'pusher-js';
 import type { ChannelAuthorizationCallback } from 'pusher-js';
@@ -112,6 +113,9 @@ async function main(): Promise<void> {
 
   startPendingWritePoller(db, auth);
   logger.info('[daemon] pending write poller started (2s interval)');
+
+  await startIndexer(db);
+  logger.info('[daemon] vector indexer started');
 
   const userId = await auth.getUserId();
 
