@@ -154,12 +154,21 @@ app.post('/api/ingest', async (_req: Request, res: Response) => {
   }
 });
 
+// Akiflow clients (reused across requests)
+const akiflowQdrant = new QdrantClient({ url: process.env.QDRANT_URL || 'http://localhost:6333' });
+const akiflowOpenai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 // Akiflow search endpoint
-app.post('/api/akiflow/search', async (req, res) => {
+app.post('/api/akiflow/search', async (req: Request, res: Response) => {
   try {
-    const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333';
-    const qdrant = new QdrantClient({ url: qdrantUrl });
-    const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    if (!req.body.query || typeof req.body.query !== 'string') {
+      res.status(400).json({ error: 'query field is required' });
+      return;
+    }
+    if (req.body.query.length > 2000) {
+      res.status(400).json({ error: 'query too long (max 2000 chars)' });
+      return;
+    }
 
     let akiflowDb: Database.Database | null = null;
     const akiflowDbPath = process.env.AKIFLOW_DB;
@@ -168,7 +177,7 @@ app.post('/api/akiflow/search', async (req, res) => {
     }
 
     try {
-      const result = await akiflowSearch(qdrant, openaiClient, akiflowDb, req.body);
+      const result = await akiflowSearch(akiflowQdrant, akiflowOpenai, akiflowDb, req.body);
       res.json(result);
     } finally {
       akiflowDb?.close();
