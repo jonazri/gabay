@@ -114,8 +114,12 @@ async function main(): Promise<void> {
   startPendingWritePoller(db, auth);
   logger.info('[daemon] pending write poller started (2s interval)');
 
-  await startIndexer(db);
-  logger.info('[daemon] vector indexer started');
+  if (!process.env.OPENAI_API_KEY) {
+    logger.info('[daemon] vector indexer not started: OPENAI_API_KEY not set');
+  } else {
+    await startIndexer(db);
+    logger.info('[daemon] vector indexer started');
+  }
 
   const userId = await auth.getUserId();
 

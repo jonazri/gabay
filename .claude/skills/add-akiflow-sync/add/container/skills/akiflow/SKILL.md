@@ -488,11 +488,13 @@ akiflow:search-tasks() {
     esac
   done
 
-  # Try hybrid search via RAG
+  # Try hybrid search via RAG (skip if AKIFLOW_SKIP_RAG is set)
   local rag_args=(--type task)
   [[ -n "$limit" ]] && rag_args+=(--limit "$limit")
-  local response
-  response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+  local response=""
+  if [[ -z "${AKIFLOW_SKIP_RAG:-}" ]]; then
+    response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+  fi
   if [[ -n "$response" ]] && echo "$response" | jq -e '.results' >/dev/null 2>&1; then
     local count
     count=$(echo "$response" | jq '.total')
@@ -923,11 +925,13 @@ akiflow:search-events() {
     esac
   done
 
-  # Try hybrid search via RAG
+  # Try hybrid search via RAG (skip if AKIFLOW_SKIP_RAG is set)
   local rag_args=(--type event)
   [[ -n "$limit" ]] && rag_args+=(--limit "$limit")
-  local response
-  response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+  local response=""
+  if [[ -z "${AKIFLOW_SKIP_RAG:-}" ]]; then
+    response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+  fi
   if [[ -n "$response" ]] && echo "$response" | jq -e '.results' >/dev/null 2>&1; then
     local count
     count=$(echo "$response" | jq '.total')
@@ -1304,10 +1308,10 @@ akiflow:search() {
       "| \(.entity_type) | \(.title) | \(.scheduled_date // .start_time // "-") | \(.status) | \(.label // .account // "-") | \(.score) | \(.entity_id) |"
     ' | (echo "| type | title | date | status | label | score | id |"; echo "|------|-------|------|--------|-------|-------|-----|"; cat)
   else
-    # Fallback: keyword-only search via SQLite
+    # Fallback: keyword-only search via SQLite (skip further RAG attempts)
     echo "(RAG service unavailable — falling back to keyword search)"
-    akiflow:search-tasks "$query"
-    akiflow:search-events "$query"
+    AKIFLOW_SKIP_RAG=1 akiflow:search-tasks "$query"
+    AKIFLOW_SKIP_RAG=1 akiflow:search-events "$query"
   fi
 }
 ```

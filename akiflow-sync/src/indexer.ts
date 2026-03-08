@@ -26,7 +26,7 @@ export function pointId(entityType: string, entityId: string): string {
 }
 
 export function formatTaskText(row: Record<string, unknown>): string {
-  const parts = [`[Task] ${row.title}`];
+  const parts = [`[Task] ${String(row.title ?? '')}`];
   if (row.label) parts.push(`Project: ${row.label}`);
   if (row.org && row.org !== row.label) parts.push(`Org: ${row.org}`);
   if (row.status) parts.push(`Status: ${row.status}`);
@@ -38,7 +38,7 @@ export function formatTaskText(row: Record<string, unknown>): string {
 }
 
 export function formatEventText(row: Record<string, unknown>): string {
-  const parts = [`[Event] ${row.title}`];
+  const parts = [`[Event] ${String(row.title ?? '')}`];
   if (row.account) parts.push(`Account: ${row.account}`);
   if (row.description) {
     const desc = String(row.description).slice(0, 200);
@@ -204,7 +204,12 @@ export async function startIndexer(db: Database.Database): Promise<void> {
   const qdrant = new QdrantClient({ url: qdrantUrl });
   const openai = new OpenAI({ apiKey });
 
-  await ensureCollection(qdrant);
+  try {
+    await ensureCollection(qdrant);
+  } catch (err) {
+    logger.error(`[indexer] failed to initialize Qdrant collection, vector indexing disabled: ${err}`);
+    return;
+  }
 
   let running = false;
   setInterval(async () => {
@@ -214,9 +219,9 @@ export async function startIndexer(db: Database.Database): Promise<void> {
       for (const [table, ids] of pendingIndex.entries()) {
         if (ids.size === 0) continue;
         const batch = [...ids].slice(0, BATCH_SIZE);
+        await processBatch(db, openai, qdrant, table, batch);
         batch.forEach((id) => ids.delete(id));
         if (ids.size === 0) pendingIndex.delete(table);
-        await processBatch(db, openai, qdrant, table, batch);
       }
     } catch (err) {
       logger.error(`[indexer] error: ${err}`);

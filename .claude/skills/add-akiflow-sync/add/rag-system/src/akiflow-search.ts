@@ -83,15 +83,15 @@ export async function akiflowSearch(
   if (db) {
     const terms = req.query.split(/\s+/).filter(Boolean);
     if (terms.length > 0) {
-      const likeClauses = terms.map((t) => {
-        const escaped = t.toLowerCase().replace(/'/g, "''");
-        return `lower(title) LIKE '%${escaped}%'`;
-      });
+      const likeClauses = terms.map(() => 'lower(title) LIKE ?');
+      const likeParams = terms.map((t) => `%${t.toLowerCase()}%`);
       const whereKeyword = likeClauses.join(' OR ');
 
       // Build extra filter clauses for keyword SQL
       const taskFilterClauses: string[] = [];
-      const taskFilterParams: unknown[] = [];
+      const taskFilterParams: unknown[] = [...likeParams];
+      if (!filters.include_done) { taskFilterClauses.push('AND done = 0'); }
+      if (!filters.include_deleted) { taskFilterClauses.push('AND deleted_at IS NULL'); }
       if (filters.label) { taskFilterClauses.push('AND label = ?'); taskFilterParams.push(filters.label); }
       if (filters.org) { taskFilterClauses.push('AND org = ?'); taskFilterParams.push(filters.org); }
 
@@ -102,7 +102,6 @@ export async function akiflowSearch(
             scheduled_date, datetime, MAX(priority) as priority
           FROM tasks_display
           WHERE (${whereKeyword})
-            AND done = 0 AND deleted_at IS NULL
             ${taskFilterClauses.join(' ')}
           GROUP BY title
           LIMIT ${limit * 4}
@@ -134,7 +133,7 @@ export async function akiflowSearch(
           WHERE (${whereKeyword})
           GROUP BY title
           LIMIT ${limit * 4}
-        `).all() as Record<string, unknown>[];
+        `).all(...likeParams) as Record<string, unknown>[];
 
         for (const row of eventRows) {
           const titleLower = String(row.title).toLowerCase();

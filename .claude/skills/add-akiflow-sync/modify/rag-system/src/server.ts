@@ -171,7 +171,7 @@ app.post('/api/akiflow/search', async (req: Request, res: Response) => {
     }
 
     let akiflowDb: Database.Database | null = null;
-    const akiflowDbPath = process.env.AKIFLOW_DB;
+    const akiflowDbPath = process.env.AKIFLOW_DB_PATH || process.env.AKIFLOW_DB;
     if (akiflowDbPath) {
       akiflowDb = new Database(akiflowDbPath, { readonly: true });
     }
