@@ -1,0 +1,16 @@
+skill: media-processing
+version: 1.0.0
+description: "Shared media attachment processing for WhatsApp (foundation for image/PDF/etc. skills)"
+core_version: 1.2.8
+adds:
+  - src/media-processing.ts
+  - src/media-processing.test.ts
+modifies:
+  - src/channels/whatsapp.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends:
+  - whatsapp
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/add-media-processing/tests/media-processing.test.ts"
