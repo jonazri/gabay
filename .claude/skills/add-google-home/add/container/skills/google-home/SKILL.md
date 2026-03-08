@@ -56,22 +56,55 @@ All lights are Govee (dimmable + color). Air filters are Coway Airmega. Temp/hum
 | Office Temperature and Humidity Sensor | Sensor | Aqara |
 | Bedroom Temperature and Humidity Sensor | Sensor | Aqara, located in Office |
 
-## Quick Start
+## Communication Modes
+
+Two ways to send commands. Choose based on whether you need the response inline.
+
+### CLI (interactive — preferred)
+
+Connects to the host via Unix socket. Response comes back directly in your tool output within seconds.
 
 ```bash
-# Send a command to Google Assistant
-google-home:command "turn on the living room lights"
-google-home:command "dim the bedroom lights to 30 percent"
-google-home:command "turn on the office air filter"
+google-home command "turn on the living room lights"
+google-home status
+google-home reset
+```
 
-# Check if Google Assistant is healthy
-google-home:status
+- **Response within 60s**: printed to stdout, you see the result immediately.
+- **Response takes >60s**: CLI exits with a message saying the command is still processing. The result is delivered via IPC to the user's chat — no action needed from you.
+- **Socket unavailable**: exits with error. Fall back to IPC (below).
+
+Use this for interactive commands where you want to confirm the result before replying to the user (e.g., "done, living room lights are on").
+
+### IPC (fire-and-forget)
+
+Write a task file directly. The host picks it up, executes it, and posts the result to the user's chat. You never see the response.
+
+```bash
+# Write a task file atomically
+REQUEST_ID="gh-$(date +%s)-$RANDOM"
+echo "{\"type\":\"google_assistant_command\",\"requestId\":\"$REQUEST_ID\",\"text\":\"turn on the lights\"}" > "/workspace/ipc/tasks/${REQUEST_ID}.json.tmp"
+mv "/workspace/ipc/tasks/${REQUEST_ID}.json.tmp" "/workspace/ipc/tasks/${REQUEST_ID}.json"
+```
+
+Use this when you don't need the response (e.g., batching multiple commands, or the user just said "turn everything off" and confirmation isn't needed).
+
+## Quick Reference
+
+```bash
+# Send a command (interactive)
+google-home command "turn on the living room lights"
+google-home command "dim the bedroom lights to 30 percent"
+google-home command "turn on the office air filter"
+
+# Check health
+google-home status
 
 # Reset conversation state (if commands are getting confused)
-google-home:reset
+google-home reset
 
 # Show automation help
-google-home:automation
+google-home automation
 ```
 
 ## Command Examples
@@ -79,43 +112,43 @@ google-home:automation
 ### Lights
 
 ```bash
-google-home:command "turn on the bedroom lights"
-google-home:command "turn off all the lights"
-google-home:command "set the living room lights to 50 percent"
-google-home:command "change the office lights to blue"
-google-home:command "dim the entryway lights"
-google-home:command "turn on the kitchen counter"
-google-home:command "set the couch light to warm white"
-google-home:command "turn on the nightlight"
+google-home command "turn on the bedroom lights"
+google-home command "turn off all the lights"
+google-home command "set the living room lights to 50 percent"
+google-home command "change the office lights to blue"
+google-home command "dim the entryway lights"
+google-home command "turn on the kitchen counter"
+google-home command "set the couch light to warm white"
+google-home command "turn on the nightlight"
 ```
 
 ### AC
 
 ```bash
-google-home:command "turn on the bedroom AC"
-google-home:command "turn off the living room AC"
+google-home command "turn on the bedroom AC"
+google-home command "turn off the living room AC"
 ```
 
 ### Air Filters
 
 ```bash
-google-home:command "turn on the bedroom air filter"
-google-home:command "turn off the office air filter"
+google-home command "turn on the bedroom air filter"
+google-home command "turn off the office air filter"
 ```
 
 ### Sensors
 
 ```bash
-google-home:command "what is the temperature in the living room"
-google-home:command "what is the humidity in the office"
+google-home command "what is the temperature in the living room"
+google-home command "what is the humidity in the office"
 ```
 
 ### Scenes & Routines
 
 ```bash
-google-home:command "activate movie time"
-google-home:command "goodnight"
-google-home:command "I'm leaving"
+google-home command "activate movie time"
+google-home command "goodnight"
+google-home command "I'm leaving"
 ```
 
 ## Google Home Automation YAML Schema
@@ -452,5 +485,5 @@ Automations are managed through the Google Home web UI. This is a best-effort pr
 - Use `agent-browser:snapshot -i` frequently to find interactive elements
 - The Google Home web UI requires authentication — use saved browser state if available
 - If the web UI layout changes, adapt by reading the current page structure
-- For simple device commands, prefer `google-home:command` over creating an automation
+- For simple device commands, prefer `google-home command` over creating an automation
 - Only create automations for recurring/scheduled/triggered actions

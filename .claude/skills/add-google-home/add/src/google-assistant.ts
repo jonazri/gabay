@@ -2,9 +2,11 @@ import { ChildProcess, spawn } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as https from 'https';
+import * as net from 'net';
 import * as path from 'path';
 import * as readline from 'readline';
 
+import { DATA_DIR } from './config.js';
 import { logger } from './logger.js';
 
 export interface GoogleAssistantResponse {
@@ -367,6 +369,24 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
   });
 }
 
+// ── Eager daemon startup ──────────────────────────────────────────
+
+/**
+ * Pre-start the Python daemon at NanoClaw startup to avoid cold-start delays.
+ * Fire-and-forget — logs but never throws.
+ */
+export async function initGoogleAssistantDaemon(): Promise<void> {
+  try {
+    await ensureDaemon();
+    logger.info('Google Assistant daemon initialized');
+  } catch (err) {
+    logger.warn(
+      { err },
+      'Google Assistant daemon failed to start at init (will retry on first command)',
+    );
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────
 
 /**
@@ -440,5 +460,147 @@ export function shutdownGoogleAssistant(): void {
       pending.reject(new Error('Google Assistant daemon shut down'));
     }
     pendingCommands.clear();
+  }
+}
+
+// ── Unix socket server ───────────────────────────────────────────
+
+let socketServer: net.Server | null = null;
+
+async function handleSocketRequest(
+  conn: net.Socket,
+  line: string,
+  isDisconnected: () => boolean,
+): Promise<void> {
+  let request: any;
+  try {
+    request = JSON.parse(line);
+  } catch {
+    if (!isDisconnected()) {
+      conn.write(
+        JSON.stringify({ status: 'error', error: 'Invalid JSON' }) + '\n',
+      );
+      conn.end();
+    }
+    return;
+  }
+
+  const { cmd, text, requestId, sourceGroup, chatJid } = request;
+
+  let result: GoogleAssistantResponse;
+  try {
+    switch (cmd) {
+      case 'command':
+        result = await sendGoogleAssistantCommand(text);
+        break;
+      case 'reset':
+        result = await resetGoogleAssistantConversation();
+        break;
+      case 'health':
+        result = await googleAssistantHealth();
+        break;
+      default:
+        result = { status: 'error', error: `Unknown command: ${cmd}` };
+    }
+  } catch (err) {
+    result = {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  // When Google Assistant returns no text (common for compound commands
+  // like "set lights to daylight and 20%"), the command may still have
+  // executed successfully. Provide a synthetic confirmation.
+  if (result.warning === 'no_response_text') {
+    result.text = 'Command sent (no verbal confirmation from Assistant).';
+  }
+
+  if (!isDisconnected()) {
+    conn.write(JSON.stringify(result) + '\n');
+    conn.end();
+  } else if (sourceGroup && chatJid && requestId) {
+    writeDeferredResponse(sourceGroup, chatJid, requestId, result);
+  }
+}
+
+function writeDeferredResponse(
+  sourceGroup: string,
+  chatJid: string,
+  requestId: string,
+  result: GoogleAssistantResponse,
+): void {
+  const messagesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'messages');
+  fs.mkdirSync(messagesDir, { recursive: true });
+  const responseText = result.error
+    ? `[Google Home] Error: ${result.error}`
+    : `[Google Home] ${result.text || 'Done'}`;
+  const msgFile = path.join(messagesDir, `${requestId}.json`);
+  const tmpFile = `${msgFile}.tmp`;
+  fs.writeFileSync(tmpFile, JSON.stringify({ chatJid, text: responseText }));
+  fs.renameSync(tmpFile, msgFile);
+  logger.info(
+    { requestId, sourceGroup },
+    'Deferred Google Assistant response written to IPC',
+  );
+}
+
+export function startGoogleAssistantSocket(): void {
+  const sockDir = path.join(DATA_DIR, 'sockets');
+  fs.mkdirSync(sockDir, { recursive: true });
+  const sockPath = path.join(sockDir, 'google-assistant.sock');
+
+  // Clean up stale socket from previous run
+  try {
+    fs.unlinkSync(sockPath);
+  } catch {}
+
+  socketServer = net.createServer((conn) => {
+    let buffer = '';
+    let disconnected = false;
+
+    conn.on('data', (data) => {
+      buffer += data.toString();
+      const newlineIdx = buffer.indexOf('\n');
+      if (newlineIdx === -1) return;
+
+      const line = buffer.slice(0, newlineIdx);
+      buffer = buffer.slice(newlineIdx + 1);
+
+      handleSocketRequest(conn, line, () => disconnected).catch((err) => {
+        logger.error({ err }, 'Socket request handler error');
+        if (!disconnected) {
+          try {
+            conn.write(
+              JSON.stringify({ status: 'error', error: String(err) }) + '\n',
+            );
+            conn.end();
+          } catch {}
+        }
+      });
+    });
+
+    conn.on('close', () => {
+      disconnected = true;
+    });
+    conn.on('error', () => {
+      disconnected = true;
+    });
+  });
+
+  socketServer.listen(sockPath, () => {
+    fs.chmodSync(sockPath, 0o666);
+    logger.info({ sockPath }, 'Google Assistant socket server listening');
+  });
+
+  socketServer.on('error', (err) => {
+    logger.error({ err }, 'Google Assistant socket server error');
+  });
+}
+
+export function stopGoogleAssistantSocket(): void {
+  if (socketServer) {
+    socketServer.close();
+    socketServer = null;
   }
 }

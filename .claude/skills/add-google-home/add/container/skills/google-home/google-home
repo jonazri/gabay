@@ -1,92 +1,21 @@
-#!/usr/bin/env bash
-# google-home — IPC wrapper for Google Assistant commands inside agent containers
-# Writes JSON task files to the IPC directory and polls for responses.
+#!/usr/bin/env node
+// google-home — Socket client for Google Assistant commands inside agent containers
+// Connects to the host-side socket server for fast, direct communication.
 
-set -euo pipefail
+'use strict';
 
-IPC_DIR="/workspace/ipc"
-TASKS_DIR="${IPC_DIR}/tasks"
-RESPONSES_DIR="${IPC_DIR}/responses"
-POLL_INTERVAL=0.5
+const net = require('net');
 
-# Generate a unique request ID
-gen_request_id() {
-  echo "gh-$(date +%s)-${RANDOM}${RANDOM}"
+const SOCKET_PATH = '/workspace/sockets/google-assistant.sock';
+const TIMEOUT_MS = 60000;
+
+function genRequestId() {
+  return `gh-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
 
-# Write a task JSON file atomically (tmp + mv)
-write_task() {
-  local request_id="$1"
-  local text="$2"
-
-  local task_file="${TASKS_DIR}/${request_id}.json"
-  local tmp_file="${task_file}.tmp"
-
-  mkdir -p "$TASKS_DIR"
-
-  jq -n \
-    --arg type "google_assistant_command" \
-    --arg requestId "$request_id" \
-    --arg text "$text" \
-    '{ type: $type, requestId: $requestId, text: $text }' \
-    > "$tmp_file"
-
-  mv "$tmp_file" "$task_file"
-}
-
-# Poll for a response file, timeout after MAX_ATTEMPTS * POLL_INTERVAL seconds
-MAX_ATTEMPTS=120  # 120 * 0.5s = 60s (allows for daemon restart + retry)
-
-poll_response() {
-  local request_id="$1"
-  local response_file="${RESPONSES_DIR}/${request_id}.json"
-  local attempt=0
-
-  while (( attempt < MAX_ATTEMPTS )); do
-    if [[ -f "$response_file" ]]; then
-      # Use jq directly on the file to avoid echo mangling large responses
-      local error
-      error=$(jq -r '.error // empty' "$response_file")
-      if [[ -n "$error" ]]; then
-        rm -f "$response_file"
-        echo "Error: $error" >&2
-        return 1
-      fi
-
-      # Print the text response
-      jq -r '.text // .status // .' "$response_file"
-      rm -f "$response_file"
-      return 0
-    fi
-
-    sleep "$POLL_INTERVAL"
-    (( attempt++ ))
-  done
-
-  echo "Error: Timed out waiting for response after 60s" >&2
-  return 1
-}
-
-# Clean up stale response files older than 5 minutes
-cleanup_stale_responses() {
-  find "$RESPONSES_DIR" -name '*.json' -mmin +5 -delete 2>/dev/null || true
-}
-
-# Send a command and wait for response
-send_and_wait() {
-  local text="$1"
-  local request_id
-  request_id=$(gen_request_id)
-
-  cleanup_stale_responses
-  write_task "$request_id" "$text"
-  poll_response "$request_id"
-}
-
-# Print usage
-usage() {
-  cat <<'USAGE'
-google-home — Control smart home devices via Google Assistant
+function usage() {
+  console.log(
+`google-home — Control smart home devices via Google Assistant
 
 Usage:
   google-home command "turn on the living room lights"
@@ -100,14 +29,13 @@ Subcommands:
   status           Check Google Assistant health
   reset            Reset the conversation state
   automation       Show automation help (YAML generation)
-  help             Show this help message
-USAGE
+  help             Show this help message`
+  );
 }
 
-# Print automation help
-automation_help() {
-  cat <<'AUTOMATION'
-Google Home Automations
+function automationHelp() {
+  console.log(
+`Google Home Automations
 
 Automations are defined as YAML and pushed via the Google Home web UI using
 the agent-browser skill. The YAML schema is documented in SKILL.md.
@@ -118,35 +46,94 @@ Workflow:
   3. Create the automation through the web UI
 
 No IPC is needed for automation management — the agent handles it directly
-using the browser skill and the YAML schema from SKILL.md.
-AUTOMATION
+using the browser skill and the YAML schema from SKILL.md.`
+  );
 }
 
-# Main
-case "${1:-help}" in
-  command)
-    if [[ -z "${2:-}" ]]; then
-      echo "Error: command requires a text argument" >&2
-      echo "Usage: google-home command \"turn on the lights\"" >&2
-      exit 1
-    fi
-    send_and_wait "$2"
-    ;;
-  status)
-    send_and_wait "__health__"
-    ;;
-  reset)
-    send_and_wait "__reset_conversation__"
-    ;;
-  automation)
-    automation_help
-    ;;
-  help|--help|-h)
-    usage
-    ;;
-  *)
-    echo "Error: Unknown subcommand '$1'" >&2
-    usage >&2
-    exit 1
-    ;;
-esac
+function sendCommand(cmd, text) {
+  const requestId = genRequestId();
+  const sourceGroup = process.env.NANOCLAW_GROUP_FOLDER || '';
+  const chatJid = process.env.NANOCLAW_CHAT_JID || '';
+
+  const request = JSON.stringify({ cmd, text, requestId, sourceGroup, chatJid }) + '\n';
+
+  const socket = net.createConnection(SOCKET_PATH);
+  let buffer = '';
+  let responded = false;
+
+  socket.setTimeout(TIMEOUT_MS);
+
+  socket.on('connect', () => {
+    socket.write(request);
+  });
+
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    const idx = buffer.indexOf('\n');
+    if (idx === -1) return;
+
+    responded = true;
+    const line = buffer.slice(0, idx);
+    try {
+      const response = JSON.parse(line);
+      if (response.error) {
+        console.error('Error: ' + response.error);
+        socket.destroy();
+        process.exitCode = 1;
+        return;
+      }
+      console.log(response.text || response.status || JSON.stringify(response));
+    } catch {
+      console.log(line);
+    }
+    socket.destroy();
+  });
+
+  socket.on('timeout', () => {
+    if (!responded) {
+      console.log('Command sent. Response timed out (60s) \u2014 the command is still being processed. The result will be delivered via IPC to the user\u2019s chat.');
+      socket.destroy();
+    }
+  });
+
+  socket.on('error', (err) => {
+    if (!responded) {
+      console.error('Error: Could not connect to Google Assistant socket: ' + err.message);
+      process.exitCode = 1;
+    }
+  });
+}
+
+const subcommand = process.argv[2] || 'help';
+const args = process.argv.slice(3);
+
+switch (subcommand) {
+  case 'command':
+    if (!args[0]) {
+      console.error('Error: command requires a text argument');
+      console.error('Usage: google-home command "turn on the lights"');
+      process.exitCode = 1;
+      break;
+    }
+    sendCommand('command', args[0]);
+    break;
+  case 'status':
+    sendCommand('health', '');
+    break;
+  case 'reset':
+    sendCommand('reset', '');
+    break;
+  case 'automation':
+    automationHelp();
+    break;
+  case 'help':
+  case '--help':
+  case '-h':
+    usage();
+    break;
+  default:
+    console.error("Error: Unknown subcommand '" + subcommand + "'");
+    usage();
+    process.exitCode = 1;
+    break;
+}

@@ -42,8 +42,11 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import {
+  initGoogleAssistantDaemon,
   shutdownGoogleAssistant,
+  startGoogleAssistantSocket,
   startGoogleTokenScheduler,
+  stopGoogleAssistantSocket,
   stopGoogleTokenScheduler,
 } from './google-assistant.js';
 import './ipc-handlers/google-home.js';
@@ -518,6 +521,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     stopGoogleTokenScheduler();
+    stopGoogleAssistantSocket();
     shutdownGoogleAssistant();
     for (const ch of channels) await ch.disconnect();
     await runShutdownHooks();
@@ -618,6 +622,8 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startGoogleTokenScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
+  startGoogleAssistantSocket();
+  initGoogleAssistantDaemon().catch(() => {}); // fire-and-forget, errors already logged
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

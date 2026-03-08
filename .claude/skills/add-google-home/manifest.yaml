@@ -1,6 +1,6 @@
 skill: google-home
 version: 1.0.0
-description: "Smart home control via Google Assistant with IPC bridge"
+description: "Smart home control via Google Assistant with Unix socket bridge"
 core_version: 0.1.0
 adds:
   - src/google-assistant.ts
