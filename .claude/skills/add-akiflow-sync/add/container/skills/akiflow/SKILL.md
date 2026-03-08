@@ -843,6 +843,34 @@ akiflow:list-slots-today() {
 }
 ```
 
+### Quick stats
+```bash
+akiflow:stats() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:stats"
+    echo "Show task and event counts."
+    return 0
+  fi
+  local today
+  today=$(date +%Y-%m-%d)
+  sqlite3 "$AKIFLOW_DB" "
+    SELECT
+      'Overdue: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
+    UNION ALL SELECT
+      'Today: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date = '$today' AND done = 0 AND deleted_at IS NULL)
+    UNION ALL SELECT
+      'Upcoming 7d: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') AND done = 0 AND deleted_at IS NULL)
+    UNION ALL SELECT
+      'Inbox: ' || (SELECT count(*) FROM tasks_display WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL)
+    UNION ALL SELECT
+      'Someday: ' || (SELECT count(*) FROM tasks_display WHERE status = 'someday' AND done = 0 AND deleted_at IS NULL)
+    UNION ALL SELECT
+      'Events today: ' || (SELECT count(*) FROM events_view WHERE start >= '$today' AND start < date('$today', '+1 day'))
+    UNION ALL SELECT
+      'Events this week: ' || (SELECT count(*) FROM events_view WHERE start >= date('$today', '-' || (strftime('%w','$today')) || ' days') AND start < date('$today', '-' || (strftime('%w','$today')) || ' days', '+7 days'))"
+}
+```
+
 ## Sync Status
 
 ```bash
