@@ -1179,6 +1179,72 @@ akiflow:stats() {
 }
 ```
 
+## Unified Search
+
+### Search across tasks and events (hybrid keyword + semantic)
+```bash
+akiflow:search() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:search '<query>' [--type task|event] [--label <label>] [--limit N]"
+    echo "Hybrid keyword + semantic search across tasks and events."
+    echo "Falls back to keyword-only if RAG service is unreachable."
+    return 0
+  fi
+  if [[ -z "${1:-}" ]]; then
+    echo "Error: missing search query" >&2
+    echo "Usage: akiflow:search '<query>'" >&2
+    return 1
+  fi
+  local query="$1"; shift
+  local type="" label="" limit="10"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type) type="$2"; shift 2 ;;
+      --label) label="$2"; shift 2 ;;
+      --limit) limit="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # Build JSON body
+  local body
+  body=$(jq -n --arg q "$query" --arg t "$type" --arg l "$label" --argjson lim "$limit" '{
+    query: $q,
+    limit: $lim,
+    filters: (
+      {}
+      | if $t != "" then .entity_type = $t else . end
+      | if $l != "" then .label = $l else . end
+    )
+  }')
+
+  # Try RAG service first
+  local response
+  response=$(curl -s --max-time 5 http://host.docker.internal:3847/api/akiflow/search \
+    -H "Content-Type: application/json" \
+    -d "$body" 2>/dev/null)
+
+  if [[ -n "$response" ]] && echo "$response" | jq -e '.results' >/dev/null 2>&1; then
+    local count
+    count=$(echo "$response" | jq '.total')
+    if [[ "$count" == "0" ]]; then
+      echo "No results for '$query'."
+      return 0
+    fi
+    echo "Found $count results for '$query':"
+    echo "$response" | jq -r '
+      .results[] |
+      "| \(.entity_type) | \(.title) | \(.scheduled_date // .start_time // "-") | \(.status) | \(.label // .account // "-") | \(.score) | \(.entity_id) |"
+    ' | (echo "| type | title | date | status | label | score | id |"; echo "|------|-------|------|--------|-------|-------|-----|"; cat)
+  else
+    # Fallback: keyword-only search via SQLite
+    echo "(RAG service unavailable — falling back to keyword search)"
+    akiflow:search-tasks "$query"
+    akiflow:search-events "$query"
+  fi
+}
+```
+
 ## Sync Status
 
 ```bash
