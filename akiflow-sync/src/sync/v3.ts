@@ -7,6 +7,7 @@ import {
 } from '../db.js';
 import type { AkiflowAuth } from '../auth.js';
 import { logger } from '../logger.js';
+import { markForReindex } from '../indexer.js';
 
 const V3_BASE = 'https://api.akiflow.com/v3';
 
@@ -44,6 +45,7 @@ export async function syncV3Entity(
 
     for (const item of body.data) {
       upsertEntity(db, entity, item);
+      if (entity === 'events') markForReindex('events', item.id as string);
       const itemTs = item.updated_at
         ? new Date(item.updated_at as string).getTime()
         : 0;
