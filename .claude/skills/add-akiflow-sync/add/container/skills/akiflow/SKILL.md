@@ -44,25 +44,26 @@ The `AKIFLOW_DB` environment variable points to the local SQLite database mainta
 
 ```bash
 # Internal: run sqlite3 query, print message if empty
+# Usage: _akiflow_query "empty msg" "SQL" [--format json] [--limit N]
 _akiflow_query() {
   local msg="$1"; shift
+  local format="markdown" limit="" query="$1"
+  shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format) format="$2"; shift 2 ;;
+      --limit) limit="LIMIT $2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$limit" ]]; then query="$query $limit"; fi
   local result
-  result=$(sqlite3 -markdown "$AKIFLOW_DB" "$@")
-  if [[ -z "$result" ]]; then
-    echo "$msg"
+  if [[ "$format" == "json" ]]; then
+    result=$(sqlite3 -json "$AKIFLOW_DB" "$query")
+    if [[ -z "$result" || "$result" == "[]" ]]; then echo "$msg"; else echo "$result"; fi
   else
-    echo "$result"
-  fi
-}
-
-_akiflow_query_json() {
-  local msg="$1"; shift
-  local result
-  result=$(sqlite3 -json "$AKIFLOW_DB" "$@")
-  if [[ -z "$result" || "$result" == "[]" ]]; then
-    echo "$msg"
-  else
-    echo "$result"
+    result=$(sqlite3 -markdown "$AKIFLOW_DB" "$query")
+    if [[ -z "$result" ]]; then echo "$msg"; else echo "$result"; fi
   fi
 }
 ```
@@ -143,16 +144,23 @@ akiflow:daily-brief() {
 ```bash
 akiflow:list-all() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-all"
+    echo "Usage: akiflow:list-all [--format json] [--limit N]"
     echo "List all active tasks (inbox, planned, snoozed, someday)."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No active tasks found." "
     SELECT title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
     WHERE done = 0 AND deleted_at IS NULL
       AND status IN ('inbox','planned','snoozed','someday')
-    ORDER BY sorting ASC"
+    ORDER BY sorting ASC" "${flags[@]}"
 }
 ```
 
@@ -160,15 +168,22 @@ akiflow:list-all() {
 ```bash
 akiflow:list-inbox() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-inbox"
+    echo "Usage: akiflow:list-inbox [--format json] [--limit N]"
     echo "List inbox tasks (unscheduled)."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No inbox tasks." "
     SELECT title, label, org, priority, id
     FROM tasks_display
     WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL
-    ORDER BY sorting ASC"
+    ORDER BY sorting ASC" "${flags[@]}"
 }
 ```
 
@@ -176,10 +191,17 @@ akiflow:list-inbox() {
 ```bash
 akiflow:list-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-today"
+    echo "Usage: akiflow:list-today [--format json] [--limit N]"
     echo "List tasks scheduled for today."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   local today
   today=$(date +%Y-%m-%d)
   _akiflow_query "No tasks scheduled for today. (Use akiflow:list-overdue for past-due tasks.)" "
@@ -187,7 +209,7 @@ akiflow:list-today() {
     FROM tasks_display
     WHERE scheduled_date = '$today'
       AND done = 0 AND deleted_at IS NULL
-    ORDER BY datetime ASC, sorting ASC"
+    ORDER BY datetime ASC, sorting ASC" "${flags[@]}"
 }
 ```
 
@@ -195,12 +217,17 @@ akiflow:list-today() {
 ```bash
 akiflow:list-overdue() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-overdue [--limit N]"
+    echo "Usage: akiflow:list-overdue [--format json] [--limit N]"
     echo "List tasks with scheduled dates in the past."
     return 0
   fi
-  local limit=""
-  if [[ "${1:-}" == "--limit" && -n "${2:-}" ]]; then limit="LIMIT $2"; fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   local today
   today=$(date +%Y-%m-%d)
   # Summary line
@@ -226,8 +253,7 @@ akiflow:list-overdue() {
     FROM tasks_display
     WHERE scheduled_date < '$today'
       AND done = 0 AND deleted_at IS NULL
-    ORDER BY scheduled_date ASC, sorting ASC
-    $limit"
+    ORDER BY scheduled_date ASC, sorting ASC" "${flags[@]}"
 }
 ```
 
@@ -235,14 +261,22 @@ akiflow:list-overdue() {
 ```bash
 akiflow:list-upcoming() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-upcoming [days]"
+    echo "Usage: akiflow:list-upcoming [days] [--format json] [--limit N]"
     echo "List tasks scheduled within the next N days (default: 7, max: 365)."
     return 0
   fi
   local days="${1:-7}"
+  shift 2>/dev/null || true
   if ! [[ "$days" =~ ^[0-9]+$ ]] || (( days < 1 || days > 365 )); then
     echo "akiflow: days must be a number between 1 and 365" >&2; return 1
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   local end_date today
   end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d)
   today=$(date +%Y-%m-%d)
@@ -252,7 +286,7 @@ akiflow:list-upcoming() {
     WHERE done = 0 AND deleted_at IS NULL
       AND scheduled_date >= '$today'
       AND scheduled_date <= '$end_date'
-    ORDER BY scheduled_date ASC, datetime ASC"
+    ORDER BY scheduled_date ASC, datetime ASC" "${flags[@]}"
 }
 ```
 
@@ -260,15 +294,22 @@ akiflow:list-upcoming() {
 ```bash
 akiflow:list-someday() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-someday"
+    echo "Usage: akiflow:list-someday [--format json] [--limit N]"
     echo "List someday tasks (no date, no active pressure)."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No someday tasks." "
     SELECT title, label, org, priority, id
     FROM tasks_display
     WHERE status = 'someday' AND done = 0 AND deleted_at IS NULL
-    ORDER BY sorting ASC"
+    ORDER BY sorting ASC" "${flags[@]}"
 }
 ```
 
@@ -303,7 +344,7 @@ akiflow:get-task() {
 ```bash
 akiflow:search-tasks() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:search-tasks '<query>'"
+    echo "Usage: akiflow:search-tasks '<query>' [--format json] [--limit N]"
     echo "Search active tasks by title (case-insensitive). Use | for OR: 'tax|IRS|filing'"
     return 0
   fi
@@ -312,7 +353,14 @@ akiflow:search-tasks() {
     echo "Usage: akiflow:search-tasks '<query>'" >&2
     return 1
   fi
-  local query="$1"
+  local query="$1"; shift
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   local where_clause=""
   IFS='|' read -ra terms <<< "$query"
   for term in "${terms[@]}"; do
@@ -325,7 +373,7 @@ akiflow:search-tasks() {
     SELECT title, status, label, org, scheduled_date, datetime, priority, id
     FROM tasks_display
     WHERE ($where_clause)
-      AND done = 0 AND deleted_at IS NULL"
+      AND done = 0 AND deleted_at IS NULL" "${flags[@]}"
 }
 ```
 
@@ -555,15 +603,22 @@ akiflow:delete-task() {
 ```bash
 akiflow:list-labels() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-labels"
+    echo "Usage: akiflow:list-labels [--format json] [--limit N]"
     echo "List all labels (projects and tags)."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No labels found." "
     SELECT title, color, is_tag, folder_id, id
     FROM labels_view
     WHERE deleted_at IS NULL
-    ORDER BY sorting ASC"
+    ORDER BY sorting ASC" "${flags[@]}"
 }
 ```
 
@@ -590,12 +645,25 @@ akiflow:list-calendars() {
 ```bash
 akiflow:list-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-events [period | start-date [end-date]]"
+    echo "Usage: akiflow:list-events [period | start-date [end-date]] [--format json] [--limit N]"
     echo "List calendar events. Period: today (default), tomorrow, this-week, next-week."
     echo "Or pass one date (single day) or two dates (range): akiflow:list-events 2026-03-15 2026-03-21"
     return 0
   fi
-  local period="${1:-today}"  # today, tomorrow, this-week, next-week, YYYY-MM-DD, YYYY-MM-DD YYYY-MM-DD
+  local period="${1:-today}"
+  local second_arg="${2:-}"
+  # Shift past positional args, then parse flags
+  shift 2>/dev/null || true
+  if [[ -n "$second_arg" && "$second_arg" != --* ]]; then
+    shift 2>/dev/null || true
+  fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   local start end
 
   case "$period" in
@@ -615,7 +683,7 @@ akiflow:list-events() {
       end=$(date -d "+$((14-dow)) days" +%Y-%m-%d 2>/dev/null || date -v+$((14-dow))d +%Y-%m-%d) ;;
     *)
       # Accepts "YYYY-MM-DD" (single day) or "YYYY-MM-DD YYYY-MM-DD" (range)
-      start="$1"; end="${2:-$1}"
+      start="$period"; end="${second_arg:-$period}"
       if ! [[ "$start" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
         echo "akiflow: invalid period or date: '$period'" >&2; return 1
       fi
@@ -628,7 +696,7 @@ akiflow:list-events() {
     SELECT start, end, title, account, CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
     FROM events_view
     WHERE start >= '$start' AND start < date('$end', '+1 day')
-    ORDER BY start ASC"
+    ORDER BY start ASC" "${flags[@]}"
 }
 ```
 
@@ -645,7 +713,7 @@ akiflow:list-events 2026-03-15 2026-03-21
 ```bash
 akiflow:search-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:search-events '<query>'"
+    echo "Usage: akiflow:search-events '<query>' [--format json] [--limit N]"
     echo "Search events by title (case-insensitive). Use | for OR: 'standup|meeting'"
     return 0
   fi
@@ -654,7 +722,14 @@ akiflow:search-events() {
     echo "Usage: akiflow:search-events '<query>'" >&2
     return 1
   fi
-  local query="$1"
+  local query="$1"; shift
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   local where_clause=""
   IFS='|' read -ra terms <<< "$query"
   for term in "${terms[@]}"; do
@@ -668,7 +743,7 @@ akiflow:search-events() {
       CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
     FROM events_view
     WHERE ($where_clause)
-    ORDER BY start ASC"
+    ORDER BY start ASC" "${flags[@]}"
 }
 ```
 
@@ -812,14 +887,21 @@ akiflow:delete-event() {
 ```bash
 akiflow:list-slots() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-slots"
+    echo "Usage: akiflow:list-slots [--format json] [--limit N]"
     echo "List all time slots."
     return 0
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No time slots found." "
     SELECT title, date, start, end, id
     FROM time_slots_view
-    WHERE deleted_at IS NULL"
+    WHERE deleted_at IS NULL" "${flags[@]}"
 }
 ```
 
@@ -827,19 +909,27 @@ akiflow:list-slots() {
 ```bash
 akiflow:list-slots-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-slots-today [YYYY-MM-DD]"
+    echo "Usage: akiflow:list-slots-today [YYYY-MM-DD] [--format json] [--limit N]"
     echo "List time slots for a specific date (default: today)."
     return 0
   fi
   local date="${1:-$(date +%Y-%m-%d)}"
+  shift 2>/dev/null || true
   if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     echo "akiflow: invalid date: '$date' (expected YYYY-MM-DD)" >&2; return 1
   fi
+  local flags=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
   _akiflow_query "No time slots for $date." "
     SELECT title, date, start, end, id
     FROM time_slots_view
     WHERE deleted_at IS NULL
-      AND date = '$date'"
+      AND date = '$date'" "${flags[@]}"
 }
 ```
 
