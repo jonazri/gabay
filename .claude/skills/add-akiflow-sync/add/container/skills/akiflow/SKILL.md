@@ -775,18 +775,18 @@ akiflow:list-events() {
     echo "Or pass one date (single day) or two dates (range): akiflow:list-events 2026-03-15 2026-03-21"
     return 0
   fi
-  local period="${1:-today}"
-  local second_arg="${2:-}"
-  # Shift past positional args, then parse flags
-  shift 2>/dev/null || true
-  if [[ -n "$second_arg" && "$second_arg" != --* ]]; then
-    shift 2>/dev/null || true
-  fi
-  local flags=()
+  local period="today" second_arg="" flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format|--limit) flags+=("$1" "$2"); shift 2 ;;
-      *) shift ;;
+      --*) shift ;;
+      *)
+        if [[ "$period" == "today" && "$1" != "today" ]]; then
+          period="$1"
+        elif [[ -z "$second_arg" ]]; then
+          second_arg="$1"
+        fi
+        shift ;;
     esac
   done
   local start end
