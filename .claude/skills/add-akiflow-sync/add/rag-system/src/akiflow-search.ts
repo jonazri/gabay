@@ -63,14 +63,18 @@ export async function akiflowSearch(
     score_threshold: 0.2,
   });
 
-  // Normalize vector scores to 0-1
+  // Normalize vector scores to 0-1, dedup by title (recurring events share titles)
   const maxVectorScore = vectorResults.length > 0
     ? Math.max(...vectorResults.map((r) => r.score)) : 1;
   const vectorMap = new Map<string, { payload: Record<string, unknown>; score: number }>();
   for (const r of vectorResults) {
     const p = r.payload as Record<string, unknown>;
-    const key = `${p.entity_type}:${p.entity_id}`;
-    vectorMap.set(key, { payload: p, score: r.score / maxVectorScore });
+    const key = `${p.entity_type}:${p.title}`;
+    const normalizedScore = r.score / maxVectorScore;
+    const existing = vectorMap.get(key);
+    if (!existing || normalizedScore > existing.score) {
+      vectorMap.set(key, { payload: p, score: normalizedScore });
+    }
   }
 
   // Keyword search via SQLite
@@ -87,10 +91,12 @@ export async function akiflowSearch(
       // Search tasks
       if (filters.entity_type !== 'event') {
         const taskRows = db.prepare(`
-          SELECT id, title, status, label, org, scheduled_date, datetime, priority, done, deleted_at
+          SELECT MIN(id) as id, title, status, label, org,
+            scheduled_date, datetime, MAX(priority) as priority
           FROM tasks_display
           WHERE (${whereKeyword})
             AND done = 0 AND deleted_at IS NULL
+          GROUP BY title
           LIMIT ${limit * 2}
         `).all() as Record<string, unknown>[];
 
@@ -99,7 +105,7 @@ export async function akiflowSearch(
           const queryLower = req.query.toLowerCase();
           const score = titleLower === queryLower ? 1.0
             : titleLower.includes(queryLower) ? 0.7 : 0.4;
-          keywordMap.set(`task:${row.id}`, {
+          keywordMap.set(`task:${row.title}`, {
             payload: {
               entity_type: 'task', entity_id: row.id, title: row.title,
               label: row.label, org: row.org, account: null,
@@ -114,9 +120,11 @@ export async function akiflowSearch(
       // Search events
       if (filters.entity_type !== 'task') {
         const eventRows = db.prepare(`
-          SELECT id, title, start, end, account, status, recurring
+          SELECT MIN(id) as id, title, MIN(start) as start,
+            MIN(end) as end, account, status
           FROM events_view
           WHERE (${whereKeyword})
+          GROUP BY title
           LIMIT ${limit * 2}
         `).all() as Record<string, unknown>[];
 
@@ -125,7 +133,7 @@ export async function akiflowSearch(
           const queryLower = req.query.toLowerCase();
           const score = titleLower === queryLower ? 1.0
             : titleLower.includes(queryLower) ? 0.7 : 0.4;
-          keywordMap.set(`event:${row.id}`, {
+          keywordMap.set(`event:${row.title}`, {
             payload: {
               entity_type: 'event', entity_id: row.id, title: row.title,
               label: null, org: null, account: row.account,
