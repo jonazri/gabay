@@ -460,7 +460,14 @@ akiflow:search-tasks() {
     local escaped
     escaped=$(printf '%s' "$term" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
     if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
-    where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
+    if [[ ${#escaped} -le 3 ]]; then
+      # Short keyword: word-boundary match (space or start/end) to reduce false positives.
+      # Matches exact word + common suffixes (s, es, ed, ing) but not unrelated longer words.
+      where_clause="${where_clause}(' ' || lower(title) || ' ' LIKE '% ${escaped} %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}s %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}es %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ed %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ing %')"
+    else
+      # Longer keyword: substring match (false positives are rare)
+      where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
+    fi
   done
   _akiflow_query "No tasks match '$query'." "
     SELECT title, status, label, org, scheduled_date, datetime, priority, id
@@ -854,7 +861,14 @@ akiflow:search-events() {
     local escaped
     escaped=$(printf '%s' "$term" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
     if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
-    where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
+    if [[ ${#escaped} -le 3 ]]; then
+      # Short keyword: word-boundary match (space or start/end) to reduce false positives.
+      # Matches exact word + common suffixes (s, es, ed, ing) but not unrelated longer words.
+      where_clause="${where_clause}(' ' || lower(title) || ' ' LIKE '% ${escaped} %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}s %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}es %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ed %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ing %')"
+    else
+      # Longer keyword: substring match (false positives are rare)
+      where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
+    fi
   done
   _akiflow_query "No events match '$query'." "
     SELECT start, end, title, account,
