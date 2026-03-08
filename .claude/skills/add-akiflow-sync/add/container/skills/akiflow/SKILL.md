@@ -141,6 +141,98 @@ akiflow:daily-brief() {
 }
 ```
 
+### Weekly plan (consolidated week view)
+```bash
+akiflow:weekly-plan() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:weekly-plan"
+    echo "Show this week's events and tasks, next week's events, overdue summary, and inbox."
+    return 0
+  fi
+  local today dow week_start week_end next_week_start next_week_end
+  today=$(date +%Y-%m-%d)
+  dow=$(date +%u)  # 1=Mon, 7=Sun
+  week_start=$(date -d "-$((dow-1)) days" +%Y-%m-%d 2>/dev/null || date -v-$((dow-1))d +%Y-%m-%d)
+  week_end=$(date -d "+$((7-dow)) days" +%Y-%m-%d 2>/dev/null || date -v+$((7-dow))d +%Y-%m-%d)
+  next_week_start=$(date -d "+$((8-dow)) days" +%Y-%m-%d 2>/dev/null || date -v+$((8-dow))d +%Y-%m-%d)
+  next_week_end=$(date -d "+$((14-dow)) days" +%Y-%m-%d 2>/dev/null || date -v+$((14-dow))d +%Y-%m-%d)
+
+  local week_start_display
+  week_start_display=$(date -d "$week_start" +"%B %-d" 2>/dev/null || date -j -f "%Y-%m-%d" "$week_start" +"%B %-d")
+  local week_end_display
+  week_end_display=$(date -d "$week_end" +"%B %-d, %Y" 2>/dev/null || date -j -f "%Y-%m-%d" "$week_end" +"%B %-d, %Y")
+  echo "=== Week of $week_start_display - $week_end_display ==="
+  echo ""
+
+  # Events this week
+  echo "--- Events this week ---"
+  local events_this
+  events_this=$(sqlite3 -markdown "$AKIFLOW_DB" "
+    SELECT start, end, title, account, id
+    FROM events_view
+    WHERE start >= '$week_start' AND start < date('$week_end', '+1 day')
+    ORDER BY start ASC")
+  if [[ -z "$events_this" ]]; then echo "No meetings this week."; else echo "$events_this"; fi
+  echo ""
+
+  # Events next week
+  echo "--- Events next week ---"
+  local events_next
+  events_next=$(sqlite3 -markdown "$AKIFLOW_DB" "
+    SELECT start, end, title, account, id
+    FROM events_view
+    WHERE start >= '$next_week_start' AND start < date('$next_week_end', '+1 day')
+    ORDER BY start ASC")
+  if [[ -z "$events_next" ]]; then echo "No meetings next week."; else echo "$events_next"; fi
+  echo ""
+
+  # Tasks this week
+  echo "--- Tasks this week ---"
+  local tasks
+  tasks=$(sqlite3 -markdown "$AKIFLOW_DB" "
+    SELECT title, label, org, scheduled_date, datetime, priority, id
+    FROM tasks_display
+    WHERE scheduled_date >= '$week_start' AND scheduled_date <= '$week_end'
+      AND done = 0 AND deleted_at IS NULL
+    ORDER BY scheduled_date ASC, datetime ASC, sorting ASC")
+  if [[ -z "$tasks" ]]; then echo "No tasks scheduled this week."; else echo "$tasks"; fi
+  echo ""
+
+  # Overdue summary (reuse the same pattern from daily-brief)
+  echo "--- Overdue ---"
+  local overdue
+  overdue=$(sqlite3 "$AKIFLOW_DB" "
+    SELECT (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
+      || ' overdue (' ||
+      COALESCE(group_concat(lc, ', '), 'none') || ')'
+    FROM (
+      SELECT COALESCE(NULLIF(org,''), 'Other') || ': ' || count(*) as lc
+      FROM tasks_display
+      WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL
+      GROUP BY COALESCE(NULLIF(org,''), 'Other')
+      ORDER BY count(*) DESC
+    )")
+  if [[ "$overdue" == *"0 overdue"* ]]; then echo "No overdue tasks."; else echo "$overdue"; fi
+  echo ""
+
+  # Inbox
+  echo "--- Inbox ---"
+  local inbox
+  inbox=$(sqlite3 "$AKIFLOW_DB" "
+    SELECT count(*) FROM tasks_display
+    WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL")
+  if [[ "$inbox" == "0" ]]; then
+    echo "Inbox empty."
+  else
+    echo "$inbox unscheduled:"
+    sqlite3 "$AKIFLOW_DB" "
+      SELECT '- ' || title FROM tasks_display
+      WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL
+      ORDER BY sorting ASC"
+  fi
+}
+```
+
 ### List all active tasks
 ```bash
 akiflow:list-all() {
