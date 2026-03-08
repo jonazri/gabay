@@ -12,6 +12,21 @@ log() {
   echo "$(date -Iseconds) $*" >> "$LOGFILE"
 }
 
+# --- Primary mode guard ---
+# Only overwrite .env with short-lived credentials.json tokens when in fallback mode.
+# In primary mode, .env has a long-term token that should not be replaced.
+STATE_FILE="$PROJECT_ROOT/.oauth-state.json"
+if [[ -f "$STATE_FILE" ]]; then
+  using_fallback=$(jq -r '.usingFallback // false' "$STATE_FILE" 2>/dev/null || echo "false")
+else
+  using_fallback="false"
+fi
+
+if [[ "$using_fallback" != "true" ]]; then
+  log "Primary mode — skipping refresh (.env has long-term token)"
+  exit 0
+fi
+
 # --- Read credentials ---
 if [[ ! -f "$CREDENTIALS" ]]; then
   log "ERROR: $CREDENTIALS not found"

@@ -23,11 +23,13 @@ const PROBE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 interface OAuthState {
   usingFallback: boolean;
   fallbackSince: string | null;
+  primaryToken: string | null;
 }
 
 const DEFAULT_STATE: OAuthState = {
   usingFallback: false,
   fallbackSince: null,
+  primaryToken: null,
 };
 
 // --- State persistence ---
@@ -172,9 +174,13 @@ export async function activateFallback(
     return ok;
   }
 
+  // Stash the current .env token (long-term) so the primary probe can
+  // test it later and restore it when it works again.
+  const currentToken = readEnvToken();
   logger.warn('Activating OAuth fallback mode — primary token failed');
   state.usingFallback = true;
   state.fallbackSince = new Date().toISOString();
+  state.primaryToken = currentToken;
   writeOAuthState(state);
 
   const ok = await refreshOAuthToken();
@@ -224,9 +230,11 @@ export function startPrimaryProbe(onAlert?: (msg: string) => void): void {
     const state = readOAuthState();
     if (!state.usingFallback) return; // Already restored
 
-    const primary = getPrimaryToken();
+    // Use the stashed primary (long-term) token, not the current .env
+    // token which is the short-lived fallback token during fallback mode.
+    const primary = state.primaryToken;
     if (!primary) {
-      logger.debug('No primary token to probe');
+      logger.debug('No stashed primary token to probe');
       probeTimer = setTimeout(probe, PROBE_INTERVAL_MS);
       return;
     }
@@ -236,6 +244,7 @@ export function startPrimaryProbe(onAlert?: (msg: string) => void): void {
       logger.info('Primary token probe succeeded — restoring primary mode');
       state.usingFallback = false;
       state.fallbackSince = null;
+      state.primaryToken = null;
       writeOAuthState(state);
       writeTokenToEnv(primary);
       stopTokenRefreshScheduler();

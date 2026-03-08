@@ -55,6 +55,7 @@ describe('readOAuthState / writeOAuthState', () => {
     expect(state).toEqual({
       usingFallback: false,
       fallbackSince: null,
+      primaryToken: null,
     });
   });
 
@@ -62,6 +63,7 @@ describe('readOAuthState / writeOAuthState', () => {
     const state = {
       usingFallback: true,
       fallbackSince: '2026-03-05T02:44:00.000Z',
+      primaryToken: null,
     };
     writeOAuthState(state);
     expect(readOAuthState()).toEqual(state);
@@ -104,6 +106,7 @@ describe('initOAuthState', () => {
     writeOAuthState({
       usingFallback: true,
       fallbackSince: '2026-03-05T02:44:00.000Z',
+      primaryToken: null,
     });
     initOAuthState();
     const state = readOAuthState();
@@ -116,6 +119,7 @@ describe('activateFallback', () => {
     writeOAuthState({
       usingFallback: false,
       fallbackSince: null,
+      primaryToken: null,
     });
 
     const alerts: string[] = [];
@@ -137,6 +141,7 @@ describe('activateFallback', () => {
     writeOAuthState({
       usingFallback: true,
       fallbackSince: '2026-03-05T02:44:00.000Z',
+      primaryToken: null,
     });
 
     const ok = await activateFallback();
@@ -174,6 +179,7 @@ describe('ensureTokenFresh', () => {
     writeOAuthState({
       usingFallback: false,
       fallbackSince: null,
+      primaryToken: null,
     });
     expect(await ensureTokenFresh()).toBe(true);
   });
@@ -193,7 +199,11 @@ describe('attemptAuthRecovery', () => {
   });
 
   it('returns true and notifies on auth error when not in fallback', async () => {
-    writeOAuthState({ usingFallback: false, fallbackSince: null });
+    writeOAuthState({
+      usingFallback: false,
+      fallbackSince: null,
+      primaryToken: null,
+    });
     const notifications: string[] = [];
     const result = await attemptAuthRecovery(
       'API Error: 401 Unauthorized',
@@ -217,6 +227,7 @@ describe('attemptAuthRecovery', () => {
     writeOAuthState({
       usingFallback: true,
       fallbackSince: '2026-03-05T00:00:00.000Z',
+      primaryToken: null,
     });
     const notifications: string[] = [];
     const result = await attemptAuthRecovery('token expired', (msg) => {
@@ -234,6 +245,7 @@ describe('startTokenRefreshScheduler', () => {
     writeOAuthState({
       usingFallback: false,
       fallbackSince: null,
+      primaryToken: null,
     });
     // Should not throw or set any timers
     startTokenRefreshScheduler();
