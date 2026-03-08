@@ -57,7 +57,7 @@ export async function akiflowSearch(
 
   const vectorResults = await qdrant.search(COLLECTION, {
     vector: queryVector,
-    limit: limit * 2,
+    limit: limit * 4,
     filter: must.length > 0 ? { must } : undefined,
     with_payload: true,
     score_threshold: 0.2,
@@ -97,7 +97,7 @@ export async function akiflowSearch(
           WHERE (${whereKeyword})
             AND done = 0 AND deleted_at IS NULL
           GROUP BY title
-          LIMIT ${limit * 2}
+          LIMIT ${limit * 4}
         `).all() as Record<string, unknown>[];
 
         for (const row of taskRows) {
@@ -125,7 +125,7 @@ export async function akiflowSearch(
           FROM events_view
           WHERE (${whereKeyword})
           GROUP BY title
-          LIMIT ${limit * 2}
+          LIMIT ${limit * 4}
         `).all() as Record<string, unknown>[];
 
         for (const row of eventRows) {
