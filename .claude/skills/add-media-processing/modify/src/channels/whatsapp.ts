@@ -18,9 +18,7 @@ import {
   STORE_DIR,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
-import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
-import { processMediaAttachment } from '../media-processing.js';
 import {
   Channel,
   OnInboundMessage,
@@ -28,6 +26,9 @@ import {
   RegisteredGroup,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+
+import { resolveGroupFolderPath } from '../group-folder.js';
+import { processMediaAttachment } from '../media-processing.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -163,6 +164,39 @@ export class WhatsAppChannel implements Channel {
           }, GROUP_SYNC_INTERVAL_MS);
         }
 
+        // Watch for regular_high app state recovery (one-shot, cleans up on success)
+        const rhVersionFile = path.join(
+          authDir,
+          'app-state-sync-version-regular_high.json',
+        );
+        if (!fs.existsSync(rhVersionFile)) {
+          const rhInterval = setInterval(() => {
+            if (fs.existsSync(rhVersionFile)) {
+              clearInterval(rhInterval);
+              logger.info(
+                'regular_high app state synced — deleteForMe now available',
+              );
+              const mainJid = Object.entries(this.opts.registeredGroups()).find(
+                ([, g]) => g.isMain,
+              )?.[0];
+              if (mainJid) {
+                const instrPath =
+                  'scripts/scratch/DELETE-FOR-ME-INSTRUCTIONS.md';
+                this.sock
+                  .sendMessage(mainJid, {
+                    text: `regular_high app state has synced — chatModify/deleteForMe is now available.\n\nSee: ${instrPath}`,
+                  })
+                  .catch((err) =>
+                    logger.warn(
+                      { err },
+                      'Failed to send regular_high recovery notification',
+                    ),
+                  );
+              }
+            }
+          }, 60_000);
+        }
+
         // Signal first connection to caller
         if (onFirstOpen) {
           onFirstOpen();
@@ -214,7 +248,11 @@ export class WhatsAppChannel implements Channel {
 
             // Process media attachments (images, PDFs, etc.)
             const groupDir = resolveGroupFolderPath(groups[chatJid].folder);
-            const mediaResult = await processMediaAttachment(msg, normalized, groupDir);
+            const mediaResult = await processMediaAttachment(
+              msg,
+              normalized,
+              groupDir,
+            );
             if (mediaResult) content = mediaResult.content;
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
