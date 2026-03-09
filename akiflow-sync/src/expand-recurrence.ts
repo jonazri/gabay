@@ -146,6 +146,12 @@ export function expandRecurringEvents(db: Database.Database): void {
   // Deduplicate masters before expanding
   const dedupedMasters = deduplicateMasters(parsed);
 
+  // Capture existing instance IDs before wipe (for tombstoning removed ones)
+  const existingIds = db
+    .prepare('SELECT instance_id FROM event_instances')
+    .all() as { instance_id: string }[];
+  const previousIds = new Set(existingIds.map((r) => r.instance_id));
+
   // Clear and rebuild
   db.exec('DELETE FROM event_instances');
 
@@ -234,6 +240,14 @@ export function expandRecurringEvents(db: Database.Database): void {
     // Mark expanded instances for vector re-indexing
     for (const row of allRows) {
       markForReindex('events', String(row[0])); // row[0] is the instance_id
+    }
+  }
+
+  // Tombstone removed instances (fell out of window or rules changed)
+  const newIds = new Set(allRows.map((row) => String(row[0])));
+  for (const oldId of previousIds) {
+    if (!newIds.has(oldId)) {
+      markForReindex('events', oldId);
     }
   }
 
