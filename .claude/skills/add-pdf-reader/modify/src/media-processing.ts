@@ -38,7 +38,7 @@ export async function processMediaAttachment(
         return { content: `[PDF: skipped — ${sizeMB}MB exceeds limit]` };
       }
       const attachDir = path.join(groupDir, 'attachments');
-      fs.mkdirSync(attachDir, { recursive: true });
+      await fs.promises.mkdir(attachDir, { recursive: true });
       // Sanitize sender-provided filename: allowlist chars, reject special names, enforce .pdf
       const rawName = (normalized as any).documentMessage.fileName || '';
       const stem = path.basename(rawName, path.extname(rawName)).replace(/[^a-zA-Z0-9_\-. ]/g, '_').slice(0, 100);
