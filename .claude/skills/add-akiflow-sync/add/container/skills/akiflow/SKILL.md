@@ -1257,11 +1257,11 @@ akiflow:stats() {
   # Build optional WHERE filter (task_stats already filters done=0, deleted_at IS NULL)
   local filter=""
   if [[ -n "$filter_label" ]]; then
-    local safe_label="${filter_label//\'/\'\'}"
+    local safe_label="${filter_label//'/''}"
     filter="$filter AND label = '$safe_label'"
   fi
   if [[ -n "$filter_org" ]]; then
-    local safe_org="${filter_org//\'/\'\'}"
+    local safe_org="${filter_org//'/''}"
     filter="$filter AND org = '$safe_org'"
   fi
 
