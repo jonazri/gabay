@@ -13,5 +13,4 @@ export const BASE_INCLUDES = [
   'package.json',
   '.env.example',
   'container/',
-  'setup/',
 ];
