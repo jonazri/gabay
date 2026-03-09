@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 
 import makeWASocket, {
@@ -15,20 +16,54 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  OWNER_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
+  QuotedMessageKey,
   RegisteredGroup,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { processMediaAttachment } from '../media-processing.js';
+
+/**
+ * Extract text content from a Baileys quoted message proto.
+ */
+function extractQuotedText(
+  quotedMessage: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!quotedMessage) return undefined;
+  const q = quotedMessage as {
+    conversation?: string;
+    extendedTextMessage?: { text?: string };
+    imageMessage?: { caption?: string };
+    videoMessage?: { caption?: string };
+  };
+  return (
+    q.conversation ||
+    q.extendedTextMessage?.text ||
+    q.imageMessage?.caption ||
+    q.videoMessage?.caption ||
+    undefined
+  );
+}
+
+const VOICE_AUDIO_DIR = path.join(process.cwd(), 'data', 'voice-audio');
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -44,7 +79,11 @@ export class WhatsAppChannel implements Channel {
   private sock!: WASocket;
   private connected = false;
   private lidToPhoneMap: Record<string, string> = {};
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<{
+    jid: string;
+    text: string;
+    quotedKey?: QuotedMessageKey;
+  }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
 
@@ -164,39 +203,6 @@ export class WhatsAppChannel implements Channel {
           }, GROUP_SYNC_INTERVAL_MS);
         }
 
-        // Watch for regular_high app state recovery (one-shot, cleans up on success)
-        const rhVersionFile = path.join(
-          authDir,
-          'app-state-sync-version-regular_high.json',
-        );
-        if (!fs.existsSync(rhVersionFile)) {
-          const rhInterval = setInterval(() => {
-            if (fs.existsSync(rhVersionFile)) {
-              clearInterval(rhInterval);
-              logger.info(
-                'regular_high app state synced — deleteForMe now available',
-              );
-              const mainJid = Object.entries(this.opts.registeredGroups()).find(
-                ([, g]) => g.isMain,
-              )?.[0];
-              if (mainJid) {
-                const instrPath =
-                  'scripts/scratch/DELETE-FOR-ME-INSTRUCTIONS.md';
-                this.sock
-                  .sendMessage(mainJid, {
-                    text: `regular_high app state has synced — chatModify/deleteForMe is now available.\n\nSee: ${instrPath}`,
-                  })
-                  .catch((err) =>
-                    logger.warn(
-                      { err },
-                      'Failed to send regular_high recovery notification',
-                    ),
-                  );
-              }
-            }
-          }, 60_000);
-        }
-
         // Signal first connection to caller
         if (onFirstOpen) {
           onFirstOpen();
@@ -256,7 +262,8 @@ export class WhatsAppChannel implements Channel {
             if (mediaResult) content = mediaResult.content;
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-            if (!content) continue;
+            // but allow voice messages through for transcription
+            if (!content && !isVoiceMessage(msg)) continue;
 
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
@@ -270,15 +277,114 @@ export class WhatsAppChannel implements Channel {
               ? fromMe
               : content.startsWith(`${ASSISTANT_NAME}:`);
 
+            // Extract reply/quote context if present
+            const contextInfo =
+              msg.message?.extendedTextMessage?.contextInfo ||
+              msg.message?.imageMessage?.contextInfo ||
+              msg.message?.videoMessage?.contextInfo ||
+              null;
+            const repliedToId = contextInfo?.stanzaId || undefined;
+            const repliedToSender = contextInfo?.participant || undefined;
+            const repliedToContent = extractQuotedText(
+              contextInfo?.quotedMessage as
+                | Record<string, unknown>
+                | null
+                | undefined,
+            );
+
+            // Transcribe voice messages and identify speaker
+            let finalContent = content;
+            if (isVoiceMessage(msg)) {
+              try {
+                const { transcript, audioBuffer } =
+                  await transcribeAudioMessage(msg, this.sock);
+
+                // Save raw audio for enrollment/debugging (opt-in via VOICE_SAVE_AUDIO=true)
+                if (process.env.VOICE_SAVE_AUDIO === 'true' && audioBuffer) {
+                  try {
+                    await fsPromises.mkdir(VOICE_AUDIO_DIR, {
+                      recursive: true,
+                    });
+                    const suffix = Math.random().toString(36).slice(2, 8);
+                    const audioPath = path.join(
+                      VOICE_AUDIO_DIR,
+                      `${Date.now()}-${suffix}.ogg`,
+                    );
+                    await fsPromises.writeFile(audioPath, audioBuffer);
+                    logger.debug({ audioPath }, 'Saved voice audio');
+                  } catch (saveErr) {
+                    logger.warn({ err: saveErr }, 'Failed to save voice audio');
+                  }
+                }
+
+                // Identify speaker
+                let speakerTag = '';
+                if (audioBuffer) {
+                  try {
+                    const result = await identifySpeaker(audioBuffer);
+                    if (result.speaker) {
+                      const pct = Math.round(result.similarity * 100);
+                      speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+
+                      // Continuous learning: update profile with high-confidence samples
+                      if (
+                        OWNER_NAME &&
+                        result.speaker === OWNER_NAME &&
+                        result.similarity >= 0.65
+                      ) {
+                        try {
+                          await updateVoiceProfile(OWNER_NAME, [
+                            result.embedding,
+                          ]);
+                          logger.info(
+                            { similarity: result.similarity },
+                            'Auto-updated voice profile with new sample',
+                          );
+                        } catch (learnErr) {
+                          logger.warn(
+                            { err: learnErr },
+                            'Failed to auto-update voice profile',
+                          );
+                        }
+                      }
+                    } else {
+                      speakerTag = ' [Unknown speaker]';
+                    }
+                  } catch (idErr) {
+                    logger.warn(
+                      { err: idErr },
+                      'Speaker identification failed',
+                    );
+                  }
+                }
+
+                if (transcript) {
+                  finalContent = `[Voice: ${transcript}]${speakerTag}`;
+                  logger.info(
+                    { chatJid, length: transcript.length, speakerTag },
+                    'Transcribed voice message',
+                  );
+                } else {
+                  finalContent = '[Voice Message - transcription unavailable]';
+                }
+              } catch (err) {
+                logger.error({ err }, 'Voice transcription error');
+                finalContent = '[Voice Message - transcription failed]';
+              }
+            }
+
             this.opts.onMessage(chatJid, {
               id: msg.key.id || '',
               chat_jid: chatJid,
               sender,
               sender_name: senderName,
-              content,
+              content: finalContent,
               timestamp,
               is_from_me: fromMe,
               is_bot_message: isBotMessage,
+              replied_to_id: repliedToId,
+              replied_to_sender: repliedToSender,
+              replied_to_content: repliedToContent,
             });
           }
         } catch (err) {
@@ -289,9 +395,53 @@ export class WhatsAppChannel implements Channel {
         }
       }
     });
+
+    // Listen for message reactions
+    this.sock.ev.on('messages.reaction', async (reactions) => {
+      for (const { key, reaction } of reactions) {
+        try {
+          const messageId = key.id;
+          if (!messageId) continue;
+          const rawChatJid = key.remoteJid;
+          if (!rawChatJid || rawChatJid === 'status@broadcast') continue;
+          const chatJid = await this.translateJid(rawChatJid);
+          const groups = this.opts.registeredGroups();
+          if (!groups[chatJid]) continue;
+          const reactorJid =
+            reaction.key?.participant || reaction.key?.remoteJid || '';
+          const emoji = reaction.text || '';
+          const timestamp = reaction.senderTimestampMs
+            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+            : new Date().toISOString();
+          storeReaction({
+            message_id: messageId,
+            message_chat_jid: chatJid,
+            reactor_jid: reactorJid,
+            reactor_name: reactorJid.split('@')[0],
+            emoji,
+            timestamp,
+          });
+          logger.info(
+            {
+              chatJid,
+              messageId: messageId.slice(0, 10) + '...',
+              reactor: reactorJid.split('@')[0],
+              emoji: emoji || '(removed)',
+            },
+            emoji ? 'Reaction added' : 'Reaction removed',
+          );
+        } catch (err) {
+          logger.error({ err }, 'Failed to process reaction');
+        }
+      }
+    });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    quotedKey?: QuotedMessageKey,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
@@ -301,7 +451,7 @@ export class WhatsAppChannel implements Channel {
       : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ jid, text: prefixed, quotedKey });
       logger.info(
         { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
         'WA disconnected, message queued',
@@ -309,16 +459,79 @@ export class WhatsAppChannel implements Channel {
       return;
     }
     try {
-      await this.sock.sendMessage(jid, { text: prefixed });
+      if (quotedKey) {
+        await this.sock.sendMessage(
+          jid,
+          { text: prefixed },
+          {
+            quoted: {
+              key: {
+                id: quotedKey.id,
+                remoteJid: quotedKey.remoteJid,
+                fromMe: quotedKey.fromMe,
+                participant: quotedKey.participant,
+              },
+              message: { conversation: quotedKey.content || '' },
+            },
+          },
+        );
+      } else {
+        await this.sock.sendMessage(jid, { text: prefixed });
+      }
       logger.info({ jid, length: prefixed.length }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ jid, text: prefixed, quotedKey });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
       );
     }
+  }
+
+  async sendReaction(
+    chatJid: string,
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
+  ): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
+      throw new Error('Not connected to WhatsApp');
+    }
+    try {
+      await this.sock.sendMessage(chatJid, {
+        react: { text: emoji, key: messageKey },
+      });
+      logger.info(
+        {
+          chatJid,
+          messageId: messageKey.id?.slice(0, 10) + '...',
+          emoji: emoji || '(removed)',
+        },
+        emoji ? 'Reaction sent' : 'Reaction removed',
+      );
+    } catch (err) {
+      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
+      throw err;
+    }
+  }
+
+  async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
+    const latest = getLatestMessage(chatJid);
+    if (!latest) {
+      throw new Error(`No messages found for chat ${chatJid}`);
+    }
+    const messageKey = {
+      id: latest.id,
+      remoteJid: chatJid,
+      fromMe: latest.fromMe,
+    };
+    await this.sendReaction(chatJid, messageKey, emoji);
   }
 
   isConnected(): boolean {
@@ -342,10 +555,6 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to update typing status');
     }
-  }
-
-  async syncGroups(force: boolean): Promise<void> {
-    return this.syncGroupMetadata(force);
   }
 
   /**
@@ -428,7 +637,25 @@ export class WhatsAppChannel implements Channel {
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
+        if (item.quotedKey) {
+          await this.sock.sendMessage(
+            item.jid,
+            { text: item.text },
+            {
+              quoted: {
+                key: {
+                  id: item.quotedKey.id,
+                  remoteJid: item.quotedKey.remoteJid,
+                  fromMe: item.quotedKey.fromMe,
+                  participant: item.quotedKey.participant,
+                },
+                message: { conversation: item.quotedKey.content || '' },
+              },
+            },
+          );
+        } else {
+          await this.sock.sendMessage(item.jid, { text: item.text });
+        }
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued message sent',
