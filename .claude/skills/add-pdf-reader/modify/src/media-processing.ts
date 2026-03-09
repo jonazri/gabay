@@ -9,6 +9,8 @@ import {
 
 import { logger } from './logger.js';
 
+const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 export interface MediaResult {
   content: string;
 }
@@ -30,6 +32,11 @@ export async function processMediaAttachment(
   if ((normalized as any)?.documentMessage?.mimetype === 'application/pdf') {
     try {
       const buffer = await downloadMediaMessage(msg, 'buffer', {});
+      if (Buffer.isBuffer(buffer) && buffer.length > MAX_PDF_SIZE_BYTES) {
+        const sizeMB = Math.round(buffer.length / (1024 * 1024));
+        logger.warn({ sizeMB, groupDir }, 'PDF too large, skipping');
+        return { content: `[PDF: skipped — ${sizeMB}MB exceeds limit]` };
+      }
       const attachDir = path.join(groupDir, 'attachments');
       fs.mkdirSync(attachDir, { recursive: true });
       // Sanitize sender-provided filename: allowlist chars, reject special names, enforce .pdf
