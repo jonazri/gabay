@@ -1,0 +1,17 @@
+[Unit]
+Description=Akiflow Sync Daemon
+After=network.target
+PartOf=nanoclaw.service
+
+[Service]
+Type=simple
+WorkingDirectory=%PROJECT_ROOT%
+EnvironmentFile=%PROJECT_ROOT%/.env
+ExecStart=%NODE_BIN% %PROJECT_ROOT%/akiflow-sync/dist/daemon.js
+Restart=always
+RestartSec=5
+StandardOutput=append:%PROJECT_ROOT%/akiflow/akiflow-sync.log
+StandardError=append:%PROJECT_ROOT%/akiflow/akiflow-sync.log
+
+[Install]
+WantedBy=default.target

@@ -27,7 +27,9 @@ if (!skillName) {
 }
 
 if (!/^[A-Za-z0-9._-]+$/.test(skillName)) {
-  console.error('Error: skill name must contain only letters, numbers, dots, hyphens, and underscores.');
+  console.error(
+    'Error: skill name must contain only letters, numbers, dots, hyphens, and underscores.',
+  );
   process.exit(1);
 }
 
@@ -54,7 +56,12 @@ function walkDir(dir: string, root: string): string[] {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       // Skip node_modules, .git, and hidden directories
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) continue;
+      if (
+        entry.name === 'node_modules' ||
+        entry.name === '.git' ||
+        entry.name.startsWith('.')
+      )
+        continue;
       results.push(...walkDir(fullPath, root));
     } else if (entry.isFile()) {
       results.push(path.relative(root, fullPath));

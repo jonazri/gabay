@@ -18,7 +18,10 @@ import { readState, writeState } from '../skills-engine/state.js';
 import { readManifest } from '../skills-engine/manifest.js';
 import { findSkillDir } from '../skills-engine/replay.js';
 import { BASE_DIR } from '../skills-engine/constants.js';
-import { loadPathRemap, resolvePathRemap } from '../skills-engine/path-remap.js';
+import {
+  loadPathRemap,
+  resolvePathRemap,
+} from '../skills-engine/path-remap.js';
 
 const projectRoot = process.cwd();
 const force = process.argv.includes('--force');
@@ -45,10 +48,10 @@ if (!force) {
       stdio: 'pipe',
     });
   } catch {
+    console.error('Error: Uncommitted changes detected in src/ or container/.');
     console.error(
-      'Error: Uncommitted changes detected in src/ or container/.',
+      'Commit or stash your changes first, or use --force to override.',
     );
-    console.error('Commit or stash your changes first, or use --force to override.');
     process.exit(1);
   }
 }

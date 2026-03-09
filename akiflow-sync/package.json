@@ -1,0 +1,27 @@
+{
+  "name": "akiflow-sync",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/daemon.js",
+    "dev": "tsx src/daemon.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.17.0",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^16.0.0",
+    "openai": "^6.27.0",
+    "pusher-js": "^8.4.0",
+    "rrule": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}
