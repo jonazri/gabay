@@ -10,8 +10,13 @@ const POLL_INTERVAL_MS = 5000;
 const BATCH_SIZE = 100;
 
 const pendingIndex = new Map<string, Set<string>>();
+let pendingMetadataRefresh = false;
 
 export function markForReindex(table: string, id: string): void {
+  if (table === 'labels' || table === 'accounts') {
+    pendingMetadataRefresh = true;
+    return;
+  }
   if (table !== 'tasks' && table !== 'events') return;
   if (!pendingIndex.has(table)) pendingIndex.set(table, new Set());
   pendingIndex.get(table)!.add(id);
@@ -216,6 +221,15 @@ export async function startIndexer(db: Database.Database): Promise<void> {
     if (running) return;
     running = true;
     try {
+      if (pendingMetadataRefresh) {
+        pendingMetadataRefresh = false;
+        const taskIds = db
+          .prepare("SELECT id FROM tasks WHERE json_extract(data,'$.deleted_at') IS NULL")
+          .all() as { id: string }[];
+        for (const { id } of taskIds) markForReindex('tasks', id);
+        logger.info(`[indexer] metadata refresh: queued ${taskIds.length} tasks for reindex`);
+      }
+
       for (const [table, ids] of pendingIndex.entries()) {
         if (ids.size === 0) continue;
         const batch = [...ids].slice(0, BATCH_SIZE);
