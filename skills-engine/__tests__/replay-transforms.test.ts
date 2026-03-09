@@ -231,6 +231,38 @@ describe('replay with transforms', () => {
     expect(processor).toContain('return "ok"');
   });
 
+  it('fails when overlay_files entry is not in effective modifies list', async () => {
+    const foundationDir = createSkillWithTransforms({
+      skill: 'foundation',
+      adds: ['src/base.ts'],
+      addFiles: { 'src/base.ts': 'base\n' },
+      transforms: {
+        handler: {
+          // overlay_files declares src/base.ts but no add_modifies for it
+          overlay_files: ['src/base.ts'],
+        },
+      },
+      transformOverlayFiles: {
+        handler: { 'src/base.ts': 'modified\n' },
+      },
+    });
+
+    const handlerDir = createSkillWithTransforms({
+      skill: 'handler',
+      adds: ['src/handler.ts'],
+      addFiles: { 'src/handler.ts': 'handler\n' },
+    });
+
+    const result = await replaySkills({
+      skills: ['foundation', 'handler'],
+      skillDirs: { foundation: foundationDir, handler: handlerDir },
+      projectRoot: tmpDir,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not in the effective modifies list');
+  });
+
   it('skips transform when target skill is not installed', async () => {
     const foundationDir = createSkillWithTransforms({
       skill: 'foundation',

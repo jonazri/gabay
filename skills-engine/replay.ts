@@ -308,7 +308,9 @@ export async function replaySkills(
         }
       }
 
-      // Merge transform overlay files (from skills that declared transforms for this skill)
+      // Merge transform overlay files (from skills that declared transforms for this skill).
+      // Note: modify_base is intentionally not supported for transform overlays —
+      // transforms always merge against upstream base (or current if no base exists).
       if (transforms && transforms.length > 0) {
         for (const ct of transforms) {
           if (!ct.transform.overlay_files) continue;
