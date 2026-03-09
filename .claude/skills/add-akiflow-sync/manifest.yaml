@@ -1,0 +1,20 @@
+skill: akiflow-sync
+version: 1.0.0
+description: "Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local DB, and conflict resolution"
+core_version: 0.1.0
+adds:
+  - container/skills/akiflow/SKILL.md
+modifies:
+  - src/container-runner.ts
+  - container/Dockerfile
+modify_base:
+  src/container-runner.ts: _accumulated
+  container/Dockerfile: _accumulated
+depends:
+  - auth-recovery
+  - container-hardening
+structured:
+  env_additions:
+    - AKIFLOW_REFRESH_TOKEN
+    - AKIFLOW_DB_PATH
+test: "cd akiflow-sync && npm test"
