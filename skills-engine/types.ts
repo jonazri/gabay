@@ -1,3 +1,14 @@
+export interface TransformManifestPatch {
+  add_depends?: string[];
+  remove_modifies?: string[];
+  add_modifies?: string[];
+}
+
+export interface SkillTransform {
+  manifest_patches?: TransformManifestPatch;
+  overlay_files?: string[]; // paths relative to transforms/<target>/modify/
+}
+
 export interface SkillManifest {
   skill: string;
   version: string;
@@ -15,6 +26,7 @@ export interface SkillManifest {
   modify_base?: Record<string, string>;
   conflicts: string[];
   depends: string[];
+  transforms?: Record<string, SkillTransform>; // key = target skill name
   test?: string;
   author?: string;
   license?: string;

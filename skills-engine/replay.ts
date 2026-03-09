@@ -15,6 +15,13 @@ import {
   mergeNpmDependencies,
   runNpmInstall,
 } from './structured.js';
+import {
+  applyManifestPatches,
+  collectTransforms,
+  CollectedTransform,
+  resolveTransformOverlayPath,
+} from './transforms.js';
+import { SkillManifest } from './types.js';
 
 export interface ReplayOptions {
   skills: string[];
@@ -71,7 +78,8 @@ export async function replaySkills(
   const perSkill: Record<string, { success: boolean; error?: string }> = {};
   const allMergeConflicts: string[] = [];
 
-  // 1. Collect all files touched by any skill in the list
+  // 1. Read all manifests upfront and collect transforms
+  const manifests: Record<string, SkillManifest> = {};
   const allTouchedFiles = new Set<string>();
   for (const skillName of options.skills) {
     const skillDir = options.skillDirs[skillName];
@@ -87,9 +95,31 @@ export async function replaySkills(
       };
     }
 
-    const manifest = readManifest(skillDir);
+    manifests[skillName] = readManifest(skillDir);
+  }
+
+  const pendingTransforms = collectTransforms(
+    options.skills,
+    options.skillDirs,
+    manifests,
+  );
+
+  // Collect all files touched by any skill (including transform overlay files)
+  for (const skillName of options.skills) {
+    const manifest = manifests[skillName];
     for (const f of manifest.adds) allTouchedFiles.add(f);
     for (const f of manifest.modifies) allTouchedFiles.add(f);
+
+    // Also include files added by transforms targeting this skill
+    if (pendingTransforms[skillName]) {
+      for (const ct of pendingTransforms[skillName]) {
+        if (ct.transform.manifest_patches?.add_modifies) {
+          for (const f of ct.transform.manifest_patches.add_modifies) {
+            allTouchedFiles.add(f);
+          }
+        }
+      }
+    }
   }
 
   // 2. Reset touched files to clean base
@@ -119,7 +149,21 @@ export async function replaySkills(
   for (const skillName of options.skills) {
     const skillDir = options.skillDirs[skillName];
     try {
-      const manifest = readManifest(skillDir);
+      let manifest = manifests[skillName];
+
+      // Apply pending transforms for this skill
+      const transforms = pendingTransforms[skillName];
+      if (transforms && transforms.length > 0) {
+        const patches = transforms
+          .map((ct) => ct.transform.manifest_patches)
+          .filter((p): p is NonNullable<typeof p> => !!p);
+        if (patches.length > 0) {
+          manifest = applyManifestPatches(manifest, patches);
+          for (const ct of transforms) {
+            console.log(`Transform: ${ct.sourceSkill} -> ${skillName}`);
+          }
+        }
+      }
 
       // Execute file_ops
       if (manifest.file_ops && manifest.file_ops.length > 0) {
@@ -152,10 +196,25 @@ export async function replaySkills(
         }
       }
 
+      // Build set of files that transform overlays will handle
+      // (these should not be looked up in the skill's own modify/ dir)
+      const transformOverlayFiles = new Set<string>();
+      if (transforms) {
+        for (const ct of transforms) {
+          if (ct.transform.overlay_files) {
+            for (const f of ct.transform.overlay_files) {
+              transformOverlayFiles.add(f);
+            }
+          }
+        }
+      }
+
       // Three-way merge modify/ files
       const skillConflicts: string[] = [];
 
       for (const relPath of manifest.modifies) {
+        // Skip files provided by transform overlays — handled in separate loop below
+        if (transformOverlayFiles.has(relPath)) continue;
         const resolvedPath = resolvePathRemap(relPath, pathRemap);
         const currentPath = path.join(projectRoot, resolvedPath);
         let mergeBasePath = path.join(baseDir, resolvedPath);
@@ -238,6 +297,75 @@ export async function replaySkills(
               fs.unlinkSync(tmpCurrent);
             } catch {
               /* ignore */
+            }
+          }
+        }
+      }
+
+      // Merge transform overlay files (from skills that declared transforms for this skill)
+      if (transforms && transforms.length > 0) {
+        for (const ct of transforms) {
+          if (!ct.transform.overlay_files) continue;
+          for (const relPath of ct.transform.overlay_files) {
+            const resolvedPath = resolvePathRemap(relPath, pathRemap);
+            const currentPath = path.join(projectRoot, resolvedPath);
+            let mergeBasePath = path.join(baseDir, resolvedPath);
+            const skillPath = resolveTransformOverlayPath(
+              ct.sourceDir,
+              skillName,
+              relPath,
+            );
+
+            if (!fs.existsSync(skillPath)) {
+              skillConflicts.push(relPath);
+              continue;
+            }
+
+            if (!fs.existsSync(currentPath)) {
+              fs.mkdirSync(path.dirname(currentPath), { recursive: true });
+              fs.copyFileSync(skillPath, currentPath);
+              continue;
+            }
+
+            let tmpBase: string | null = null;
+            let tmpCurrent: string | null = null;
+            try {
+              if (!fs.existsSync(mergeBasePath)) {
+                tmpBase = path.join(
+                  os.tmpdir(),
+                  `nanoclaw-base-${crypto.randomUUID()}-${path.basename(relPath)}`,
+                );
+                fs.copyFileSync(currentPath, tmpBase);
+                mergeBasePath = tmpBase;
+              }
+
+              tmpCurrent = path.join(
+                os.tmpdir(),
+                `nanoclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
+              );
+              fs.copyFileSync(currentPath, tmpCurrent);
+
+              const result = mergeFile(tmpCurrent, mergeBasePath, skillPath);
+
+              fs.copyFileSync(tmpCurrent, currentPath);
+              if (!result.clean) {
+                skillConflicts.push(resolvedPath);
+              }
+            } finally {
+              if (tmpBase) {
+                try {
+                  fs.unlinkSync(tmpBase);
+                } catch {
+                  /* ignore */
+                }
+              }
+              if (tmpCurrent) {
+                try {
+                  fs.unlinkSync(tmpCurrent);
+                } catch {
+                  /* ignore */
+                }
+              }
             }
           }
         }

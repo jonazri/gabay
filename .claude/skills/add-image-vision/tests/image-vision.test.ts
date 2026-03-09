@@ -14,7 +14,7 @@ describe('add-image-vision skill package', () => {
 
     it('has a valid manifest.yaml', () => {
       expect(fs.existsSync(path.join(SKILL_DIR, 'manifest.yaml'))).toBe(true);
-      expect(content).toContain('skill: add-image-vision');
+      expect(content).toContain('skill: image-vision');
       expect(content).toContain('version: 1.1.0');
     });
 
