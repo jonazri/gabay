@@ -98,8 +98,10 @@ export async function akiflowSearch(
       // Search tasks
       if (filters.entity_type !== 'event') {
         const taskRows = db.prepare(`
-          SELECT MIN(id) as id, title, status, label, org,
-            scheduled_date, datetime, MAX(priority) as priority
+          SELECT MIN(id) as id, title, MIN(status) as status,
+            MIN(label) as label, MIN(org) as org,
+            MIN(scheduled_date) as scheduled_date, MIN(datetime) as datetime,
+            MAX(priority) as priority
           FROM tasks_display
           WHERE (${whereKeyword})
             ${taskFilterClauses.join(' ')}
@@ -128,7 +130,7 @@ export async function akiflowSearch(
       if (filters.entity_type !== 'task') {
         const eventRows = db.prepare(`
           SELECT MIN(id) as id, title, MIN(start) as start,
-            MIN(end) as end, account, status
+            MIN(end) as end, MIN(account) as account, MIN(status) as status
           FROM events_view
           WHERE (${whereKeyword})
           GROUP BY title
