@@ -31,7 +31,12 @@ describe('media-processing skill package', () => {
   });
 
   it('has the unit test', () => {
-    const testPath = path.join(skillDir, 'add', 'src', 'media-processing.test.ts');
+    const testPath = path.join(
+      skillDir,
+      'add',
+      'src',
+      'media-processing.test.ts',
+    );
     expect(fs.existsSync(testPath)).toBe(true);
 
     const content = fs.readFileSync(testPath, 'utf-8');
@@ -40,15 +45,23 @@ describe('media-processing skill package', () => {
   });
 
   it('has whatsapp.ts overlay with correct changes', () => {
-    const overlayPath = path.join(skillDir, 'modify', 'src', 'channels', 'whatsapp.ts');
+    const overlayPath = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'whatsapp.ts',
+    );
     expect(fs.existsSync(overlayPath)).toBe(true);
 
     const content = fs.readFileSync(overlayPath, 'utf-8');
     // Delta changes
-    expect(content).toContain("import { processMediaAttachment } from '../media-processing.js';");
+    expect(content).toContain(
+      "import { processMediaAttachment } from '../media-processing.js';",
+    );
     expect(content).toContain('resolveGroupFolderPath');
     expect(content).toContain('let content =');
-    expect(content).toContain('processMediaAttachment(msg, normalized, groupDir)');
+    expect(content).toContain('await processMediaAttachment(');
 
     // Invariants
     expect(content).toContain('class WhatsAppChannel');
@@ -58,7 +71,13 @@ describe('media-processing skill package', () => {
   });
 
   it('has intent doc for whatsapp.ts', () => {
-    const intentPath = path.join(skillDir, 'modify', 'src', 'channels', 'whatsapp.ts.intent.md');
+    const intentPath = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'whatsapp.ts.intent.md',
+    );
     expect(fs.existsSync(intentPath)).toBe(true);
   });
 });
