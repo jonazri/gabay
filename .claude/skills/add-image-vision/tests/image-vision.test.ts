@@ -11,7 +11,7 @@ describe('image-vision skill package', () => {
     expect(fs.existsSync(manifestPath)).toBe(true);
 
     const content = yaml.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    expect(content.skill).toBe('add-image-vision');
+    expect(content.skill).toBe('image-vision');
     expect(content.adds).toContain('src/image.ts');
     expect(content.adds).toContain('src/image.test.ts');
     expect(content.modifies).toContain('src/media-processing.ts');
@@ -47,7 +47,12 @@ describe('image-vision skill package', () => {
   });
 
   it('has media-processing.ts overlay with image handler', () => {
-    const overlayPath = path.join(skillDir, 'modify', 'src', 'media-processing.ts');
+    const overlayPath = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'media-processing.ts',
+    );
     expect(fs.existsSync(overlayPath)).toBe(true);
 
     const content = fs.readFileSync(overlayPath, 'utf-8');
@@ -68,7 +73,12 @@ describe('image-vision skill package', () => {
   });
 
   it('has container-runner.ts overlay with imageAttachments field', () => {
-    const overlayPath = path.join(skillDir, 'modify', 'src', 'container-runner.ts');
+    const overlayPath = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'container-runner.ts',
+    );
     expect(fs.existsSync(overlayPath)).toBe(true);
 
     const content = fs.readFileSync(overlayPath, 'utf-8');
@@ -78,7 +88,12 @@ describe('image-vision skill package', () => {
 
   it('has agent-runner overlay with multimodal support', () => {
     const overlayPath = path.join(
-      skillDir, 'modify', 'container', 'agent-runner', 'src', 'index.ts',
+      skillDir,
+      'modify',
+      'container',
+      'agent-runner',
+      'src',
+      'index.ts',
     );
     expect(fs.existsSync(overlayPath)).toBe(true);
 

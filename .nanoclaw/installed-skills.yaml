@@ -14,8 +14,11 @@ skills:
   - shabbat-mode
   - container-hardening
   - task-scheduler-fixes
+  - media-processing
   - voice-transcription-elevenlabs
   - voice-recognition
+  - image-vision
+  - pdf-reader
   - whatsapp-search
   - perplexity-research
   - feature-request
