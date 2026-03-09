@@ -23,6 +23,7 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
+import { AUTH_ERROR_PATTERN, readOAuthState } from './oauth.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -167,9 +168,19 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'responses'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
+    readonly: false,
+  });
+
+  // Shared sockets directory (for direct CLI-to-host communication)
+  const socketsDir = path.join(DATA_DIR, 'sockets');
+  fs.mkdirSync(socketsDir, { recursive: true });
+  mounts.push({
+    hostPath: socketsDir,
+    containerPath: '/workspace/sockets',
     readonly: false,
   });
 

@@ -9,6 +9,7 @@ modifies:
   - src/index.ts
   - src/ipc.ts
 modify_base:
+  src/db.ts: reactions
   src/index.ts: lifecycle-hooks
   src/ipc.ts: reactions
 conflicts: []

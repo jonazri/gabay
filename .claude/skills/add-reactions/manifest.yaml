@@ -20,6 +20,7 @@ modifies:
   - src/ipc-auth.test.ts
 modify_base:
   src/index.ts: lifecycle-hooks
+  src/ipc.ts: ipc-handler-registry
 conflicts: []
 depends: []
 test: "npx tsc --noEmit"

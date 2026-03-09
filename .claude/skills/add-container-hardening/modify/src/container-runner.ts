@@ -221,6 +221,15 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Shared sockets directory (for direct CLI-to-host communication)
+  const socketsDir = path.join(DATA_DIR, 'sockets');
+  fs.mkdirSync(socketsDir, { recursive: true });
+  mounts.push({
+    hostPath: socketsDir,
+    containerPath: '/workspace/sockets',
+    readonly: false,
+  });
+
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.

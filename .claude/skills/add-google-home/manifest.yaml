@@ -16,6 +16,7 @@ modifies:
   - container/Dockerfile
 modify_base:
   src/index.ts: lifecycle-hooks
+  src/container-runner.ts: refresh-oauth
 conflicts: []
 incompatible_with: []
 depends: [ipc-handler-registry, lifecycle-hooks, refresh-oauth]

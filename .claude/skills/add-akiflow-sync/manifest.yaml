@@ -4,6 +4,8 @@ description: "Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local 
 core_version: 0.1.0
 adds:
   - container/skills/akiflow/SKILL.md
+  - container/skills/akiflow/akiflow-functions.sh
+  - container/skills/akiflow/akiflow
 modifies:
   - src/container-runner.ts
   - container/Dockerfile

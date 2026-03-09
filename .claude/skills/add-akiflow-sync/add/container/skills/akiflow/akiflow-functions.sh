@@ -1,48 +1,29 @@
----
-name: akiflow
-description: Manage your Akiflow tasks, projects, calendar events, and time slots. Use for creating tasks, scheduling, reviewing inbox, checking your calendar, completing items, and managing your someday list.
-allowed-tools: Bash(akiflow:*)
----
+#!/bin/bash
+# Auto-extracted from SKILL.md — all akiflow bash function definitions.
+# Source this file to make all akiflow commands available in the current shell.
 
-# Akiflow
+# Ensure all required views exist (idempotent, runs once on source)
+if [[ -n "$AKIFLOW_DB" && -f "$AKIFLOW_DB" ]]; then
+  sqlite3 "$AKIFLOW_DB" "
+    CREATE VIEW IF NOT EXISTS task_stats AS
+    SELECT
+      COALESCE(NULLIF(label, ''), 'Other')  AS label,
+      COALESCE(NULLIF(org, ''), 'Other')    AS org,
+      status,
+      CASE priority
+        WHEN 4 THEN 'goal'
+        WHEN 3 THEN 'high'
+        WHEN 2 THEN 'medium'
+        WHEN 1 THEN 'low'
+        ELSE 'none'
+      END AS priority_label,
+      scheduled_date,
+      done
+    FROM tasks_display
+    WHERE done = 0 AND deleted_at IS NULL;
+  " 2>/dev/null
+fi
 
-Full task and calendar management via a local SQLite database kept in sync by the akiflow-sync daemon.
-
-## When to Use
-
-- User wants to add, view, update, complete, or delete tasks
-- User wants to check today's schedule, upcoming events, or inbox
-- User wants to plan a task for a specific date or assign it to a project/tag
-- User wants to create or manage calendar events
-- User wants to review or move items on their someday list
-
-## Core Concepts
-
-| Concept | Notes |
-|---|---|
-| **Inbox** (status 1) | New unscheduled tasks. Default for newly created tasks. |
-| **Planned** (status 2) | Has a `date` assigned. With `date` only → appears as a to-do. With `date` + `datetime` → appears on calendar. |
-| **Completed** (status 3) | Done. Set `done: true`, `done_at: <epoch ms>`, `status: 3`. |
-| **Snoozed** (status 4) | Temporarily hidden. |
-| **Archived** (status 5) | Archived. |
-| **Deleted** (status 6) | Soft-deleted. |
-| **Someday** (status 7) | "Maybe later" — no date, no active pressure. |
-| **Hidden** (status 8) | Hidden from view. |
-| **Permanently Deleted** (status 9) | Removed permanently. |
-| **Trashed** (status 10) | In trash. |
-| **Cancelled** (status 11) | Cancelled. |
-| **Labels** | Both **projects** (`is_tag: false`) and **tags** (`is_tag: true`). `listId` = primary project, `tags_ids` = array of tag UUIDs. |
-| **Time Slots** | Calendar containers for activity types (e.g., "Deep Work", "Admin"). Hold tasks, not events. Tasks reference them via `time_slot_id`. |
-| **Events** | Calendar events (meetings, appointments) from connected Google/Outlook accounts. |
-
-**Always call `akiflow list-labels` first** if you need to assign a project or tag — you need the UUID.
-**Always call `akiflow list-calendars` first** if you need to create an event — you need the `calendarId`.
-
-The `AKIFLOW_DB` environment variable points to the local SQLite database maintained by the akiflow-sync daemon. Reads are instant; writes are queued via `pending_writes` and synced to the server automatically.
-
-## Helpers
-
-```bash
 # Internal: run sqlite3 query, print message if empty
 # Usage: _akiflow_query "empty msg" "SQL" [--format json] [--limit N]
 _akiflow_query() {
@@ -95,12 +76,7 @@ _akiflow_rag_search() {
     -H "Content-Type: application/json" \
     -d "$body" 2>/dev/null
 }
-```
 
-## Tasks
-
-### Daily brief (consolidated today view)
-```bash
 akiflow:daily-brief() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow daily-brief"
@@ -168,10 +144,7 @@ akiflow:daily-brief() {
       ORDER BY sorting ASC"
   fi
 }
-```
 
-### Weekly plan (consolidated week view)
-```bash
 akiflow:weekly-plan() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow weekly-plan"
@@ -260,10 +233,7 @@ akiflow:weekly-plan() {
       ORDER BY sorting ASC"
   fi
 }
-```
 
-### List all active tasks
-```bash
 akiflow:list-all() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-all [--format json] [--limit N]"
@@ -284,10 +254,7 @@ akiflow:list-all() {
       AND status IN ('inbox','planned','snoozed','someday')
     ORDER BY sorting ASC" "${flags[@]}"
 }
-```
 
-### List inbox tasks (unscheduled)
-```bash
 akiflow:list-inbox() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-inbox [--format json] [--limit N]"
@@ -307,10 +274,7 @@ akiflow:list-inbox() {
     WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL
     ORDER BY sorting ASC" "${flags[@]}"
 }
-```
 
-### List today's tasks
-```bash
 akiflow:list-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-today [--format json] [--limit N]"
@@ -333,10 +297,7 @@ akiflow:list-today() {
       AND done = 0 AND deleted_at IS NULL
     ORDER BY datetime ASC, sorting ASC" "${flags[@]}"
 }
-```
 
-### List overdue tasks
-```bash
 akiflow:list-overdue() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-overdue [--format json] [--limit N]"
@@ -377,10 +338,7 @@ akiflow:list-overdue() {
       AND done = 0 AND deleted_at IS NULL
     ORDER BY scheduled_date ASC, sorting ASC" "${flags[@]}"
 }
-```
 
-### List upcoming tasks
-```bash
 akiflow:list-upcoming() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-upcoming [days] [--format json] [--limit N]"
@@ -412,10 +370,7 @@ akiflow:list-upcoming() {
       AND scheduled_date <= '$end_date'
     ORDER BY scheduled_date ASC, datetime ASC" "${flags[@]}"
 }
-```
 
-### List someday tasks
-```bash
 akiflow:list-someday() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-someday [--format json] [--limit N]"
@@ -435,10 +390,7 @@ akiflow:list-someday() {
     WHERE status = 'someday' AND done = 0 AND deleted_at IS NULL
     ORDER BY sorting ASC" "${flags[@]}"
 }
-```
 
-### Get a single task (raw JSON)
-```bash
 akiflow:get-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow get-task <id>"
@@ -462,10 +414,7 @@ akiflow:get-task() {
   fi
   echo "$result" | jq '.[0].data | fromjson'
 }
-```
 
-### Search tasks by title
-```bash
 akiflow:search-tasks() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow search-tasks '<query>' [--format json] [--limit N]"
@@ -535,25 +484,7 @@ akiflow:search-tasks() {
     WHERE ($where_clause)
       AND done = 0 AND deleted_at IS NULL" "${flags[@]}"
 }
-```
 
-### Create a task
-
-Pass a JSON object. Required: `title`. Optional fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `status` | number | Default 1 (INBOX). Use 2 (PLANNED) with a `date`. |
-| `date` | string | ISO date: `"2026-03-05"` |
-| `datetime` | string | ISO datetime: `"2026-03-05T15:00:00.000Z"` |
-| `duration` | number | Minutes |
-| `priority` | number | 0=none, 1=low, 2=medium, 3=high, 4=goal |
-| `listId` | string | Primary project UUID |
-| `tags_ids` | string[] | Additional tag UUIDs |
-| `description` | string | Rich text notes |
-| `origin_url` | string | Link to source (email, web page, etc.) |
-
-```bash
 akiflow:create-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow create-task '<json>'"
@@ -594,22 +525,7 @@ akiflow:create-task() {
   echo "Created task $id"
   echo "$payload"
 }
-```
 
-**Examples:**
-```bash
-# Quick inbox capture
-akiflow create-task '{"title": "Buy groceries"}'
-
-# Planned for a date with priority and project
-akiflow create-task '{"title": "Review PR", "date": "2026-03-03", "status": 2, "priority": 2, "listId": "project-uuid"}'
-```
-
-### Update a task
-
-Pass the task UUID and a partial JSON object with only the fields to change.
-
-```bash
 akiflow:update-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow update-task <id> '<json>'"
@@ -664,22 +580,7 @@ akiflow:update-task() {
   sqlite3 -json "$AKIFLOW_DB" "SELECT data FROM tasks WHERE id = '$id'" \
     | jq '.[0].data | fromjson'
 }
-```
 
-**Examples:**
-```bash
-# Reschedule to a date
-akiflow update-task "task-uuid" '{"date": "2026-03-05", "status": 2}'
-
-# Set high priority
-akiflow update-task "task-uuid" '{"priority": 3}'
-
-# Move to someday
-akiflow update-task "task-uuid" '{"status": 7, "date": null, "datetime": null}'
-```
-
-### Reschedule a task
-```bash
 akiflow:reschedule-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow reschedule-task <id> <YYYY-MM-DD>"
@@ -697,10 +598,7 @@ akiflow:reschedule-task() {
   fi
   akiflow:update-task "$id" "{\"date\": \"$date\", \"status\": 2, \"datetime\": null}"
 }
-```
 
-### Complete a task
-```bash
 akiflow:complete-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow complete-task <id>"
@@ -739,10 +637,7 @@ akiflow:complete-task() {
   fi
   echo "Completed task $id"
 }
-```
 
-### Delete a task (soft delete)
-```bash
 akiflow:delete-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow delete-task <id>"
@@ -780,12 +675,7 @@ akiflow:delete-task() {
   fi
   echo "Deleted task $id"
 }
-```
 
-## Labels (Projects & Tags)
-
-### List all labels
-```bash
 akiflow:list-labels() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-labels [--format json] [--limit N]"
@@ -805,14 +695,7 @@ akiflow:list-labels() {
     WHERE deleted_at IS NULL
     ORDER BY sorting ASC" "${flags[@]}"
 }
-```
 
-Response fields: `id`, `title`, `color` (hex), `is_tag` (0=project, 1=tag), `folder_id` (optional folder grouping).
-
-## Calendars & Events
-
-### List calendars
-```bash
 akiflow:list-calendars() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-calendars [--format json] [--limit N]"
@@ -831,10 +714,7 @@ akiflow:list-calendars() {
     FROM calendars_view
     WHERE deleted_at IS NULL" "${flags[@]}"
 }
-```
 
-### List events for a period
-```bash
 akiflow:list-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-events [period | start-date [end-date]] [--format json] [--limit N]"
@@ -890,19 +770,7 @@ akiflow:list-events() {
     WHERE start >= '$start' AND start < date('$end', '+1 day')
     ORDER BY start ASC" "${flags[@]}"
 }
-```
 
-Modifiers: `today`, `tomorrow`, `this-week`, `next-week`, or explicit dates. The `account` column maps calendar email domains to short names (JLI = myjli.com, TTO = tefillinconnection.org, DLN = dichalane.com, Personal = gmail.com).
-
-Examples:
-```bash
-akiflow list-events today
-akiflow list-events next-week
-akiflow list-events 2026-03-15 2026-03-21
-```
-
-### Search events by title
-```bash
 akiflow:search-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow search-events '<query>' [--format json] [--limit N]"
@@ -973,13 +841,7 @@ akiflow:search-events() {
     WHERE ($where_clause)
     ORDER BY start ASC" "${flags[@]}"
 }
-```
 
-### Create an event
-
-Events are written to the server directly. Required: `calendarId`, `title`, `start`, `end`.
-
-```bash
 akiflow:create-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow create-event '<json>'"
@@ -1019,10 +881,7 @@ akiflow:create-event() {
   echo "Created event $id"
   echo "$payload"
 }
-```
 
-### Update an event
-```bash
 akiflow:update-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow update-event <id> '<json>'"
@@ -1072,10 +931,7 @@ akiflow:update-event() {
   fi
   echo "Updated event $id"
 }
-```
 
-### Reschedule an event
-```bash
 akiflow:reschedule-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow reschedule-event <id> <YYYY-MM-DD>"
@@ -1139,10 +995,7 @@ akiflow:reschedule-event() {
 
   akiflow:update-event "$id" "{\"start_time\": \"$new_start\", \"end_time\": \"$new_end\"}"
 }
-```
 
-### Delete an event
-```bash
 akiflow:delete-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow delete-event <id>"
@@ -1174,12 +1027,7 @@ akiflow:delete-event() {
   fi
   echo "Deleted event $id"
 }
-```
 
-## Time Slots
-
-### List all time slots
-```bash
 akiflow:list-slots() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-slots [--format json] [--limit N]"
@@ -1198,10 +1046,7 @@ akiflow:list-slots() {
     FROM time_slots_view
     WHERE deleted_at IS NULL" "${flags[@]}"
 }
-```
 
-### List time slots for a specific date
-```bash
 akiflow:list-slots-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow list-slots-today [YYYY-MM-DD] [--format json] [--limit N]"
@@ -1230,10 +1075,7 @@ akiflow:list-slots-today() {
     WHERE deleted_at IS NULL
       AND date = '$date'" "${flags[@]}"
 }
-```
 
-### Quick stats
-```bash
 akiflow:stats() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow stats [--by label|org|priority|status] [--label <name>] [--org <name>]"
@@ -1307,12 +1149,7 @@ akiflow:stats() {
     UNION ALL SELECT
       'Events this week: ' || (SELECT count(*) FROM events_view WHERE start >= date('$today', '-' || (strftime('%w','$today')) || ' days') AND start < date('$today', '-' || (strftime('%w','$today')) || ' days', '+7 days'))"
 }
-```
 
-## Unified Search
-
-### Search across tasks and events (hybrid keyword + semantic)
-```bash
 akiflow:search() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow search '<query>' [--type task|event] [--label <label>] [--limit N]"
@@ -1363,11 +1200,7 @@ akiflow:search() {
     AKIFLOW_SKIP_RAG=1 akiflow:search-events "$query"
   fi
 }
-```
 
-## Sync Status
-
-```bash
 akiflow:sync-status() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow sync-status"
@@ -1379,17 +1212,3 @@ akiflow:sync-status() {
   echo "=== Pending writes ==="
   sqlite3 -markdown "$AKIFLOW_DB" "SELECT status, count(*) as count FROM pending_writes GROUP BY status"
 }
-```
-
-## Tips
-
-- `date` is ISO date (`"2026-03-01"`); `datetime` is ISO datetime (`"2026-03-01T15:00:00.000Z"`) for a specific time on that day
-- Setting `status: 2` with `date` = planned as a to-do; add `datetime` to make it appear on the calendar timeline
-- Read helpers query `tasks_display` view which provides `scheduled_date` (calculated from `date` or `plan_unit`/`plan_period`), human-readable `status`, `label`, and `org`
-- `listId` = primary project UUID; `tags_ids` = array of additional tag UUIDs
-- `origin_url` links a task to a URL (email thread, web page, Jira ticket, etc.)
-- Recurring events are read-only — `update-event` and `delete-event` only affect single instances. To change a recurring series, the user must edit it in Akiflow directly.
-- Use `akiflow sync-status` to check if the daemon is running and writes are being processed
-- Reads are instant (local SQLite); writes are queued and synced automatically by the daemon
-- All `datetime` values are ISO 8601 UTC (ending in `Z`). The `TZ` env var is set to the user's local timezone for display formatting.
-- `duration` is in minutes (e.g., `30` = 30 minutes).
