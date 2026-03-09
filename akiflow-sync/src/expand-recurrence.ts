@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import rrulePkg from 'rrule';
 const { RRule, rrulestr } = rrulePkg;
+import { markForReindex } from './indexer.js';
 import { logger } from './logger.js';
 
 /** Rolling window: expand recurring events from MONTHS_BACK to MONTHS_AHEAD. */
@@ -145,6 +146,12 @@ export function expandRecurringEvents(db: Database.Database): void {
   // Deduplicate masters before expanding
   const dedupedMasters = deduplicateMasters(parsed);
 
+  // Capture existing instance IDs before wipe (for tombstoning removed ones)
+  const existingIds = db
+    .prepare('SELECT instance_id FROM event_instances')
+    .all() as { instance_id: string }[];
+  const previousIds = new Set(existingIds.map((r) => r.instance_id));
+
   // Clear and rebuild
   db.exec('DELETE FROM event_instances');
 
@@ -230,6 +237,18 @@ export function expandRecurringEvents(db: Database.Database): void {
 
   if (allRows.length > 0) {
     insertMany(allRows);
+    // Mark expanded instances for vector re-indexing
+    for (const row of allRows) {
+      markForReindex('events', String(row[0])); // row[0] is the instance_id
+    }
+  }
+
+  // Tombstone removed instances (fell out of window or rules changed)
+  const newIds = new Set(allRows.map((row) => String(row[0])));
+  for (const oldId of previousIds) {
+    if (!newIds.has(oldId)) {
+      markForReindex('events', oldId);
+    }
   }
 
   logger.info(

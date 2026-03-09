@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getEntity, upsertEntity, type ApiEntity } from './db.js';
+import { markForReindex } from './indexer.js';
 
 export interface ConflictCtx {
   db: Database.Database;
@@ -11,6 +12,7 @@ export function resolveAndUpsert(ctx: ConflictCtx, remote: ApiEntity): void {
 
   if (!local) {
     upsertEntity(ctx.db, ctx.table, remote);
+    markForReindex(ctx.table, remote.id);
     return;
   }
 
@@ -24,6 +26,7 @@ export function resolveAndUpsert(ctx: ConflictCtx, remote: ApiEntity): void {
     const entity =
       ctx.table === 'tasks' ? protectLocalFields(remote, local.data) : remote;
     upsertEntity(ctx.db, ctx.table, entity);
+    markForReindex(ctx.table, entity.id);
   } else {
     // Local wins globally — keep local, but apply remotely-newer fields for tasks
     if (ctx.table === 'tasks') {
@@ -84,6 +87,7 @@ function applyNewerRemoteFields(
 
   if (changed) {
     upsertEntity(ctx.db, ctx.table, local as ApiEntity);
+    markForReindex(ctx.table, local.id as string);
   }
 }
 

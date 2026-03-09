@@ -277,6 +277,24 @@ export function initDb(dbPath: string): Database.Database {
     FROM tasks t
     LEFT JOIN labels_view l ON json_extract(t.data, '$.listId') = l.id
     LEFT JOIN accounts_view a ON json_extract(t.data, '$.akiflow_account_id') = a.id;
+
+    -- Pre-computed stats base: active tasks with date/priority classification
+    CREATE VIEW IF NOT EXISTS task_stats AS
+    SELECT
+      COALESCE(NULLIF(label, ''), 'Other')  AS label,
+      COALESCE(NULLIF(org, ''), 'Other')    AS org,
+      status,
+      CASE priority
+        WHEN 4 THEN 'goal'
+        WHEN 3 THEN 'high'
+        WHEN 2 THEN 'medium'
+        WHEN 1 THEN 'low'
+        ELSE 'none'
+      END AS priority_label,
+      scheduled_date,
+      done
+    FROM tasks_display
+    WHERE done = 0 AND deleted_at IS NULL;
   `);
 
   return db;

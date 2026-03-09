@@ -66,6 +66,35 @@ _akiflow_query() {
     if [[ -z "$result" ]]; then echo "$msg"; else echo "$result"; fi
   fi
 }
+
+# Internal: call RAG endpoint for hybrid vector+keyword search
+# Usage: _akiflow_rag_search "query" [--type task|event] [--label label] [--limit N]
+# Outputs raw JSON response; empty string if RAG unavailable
+_akiflow_rag_search() {
+  local query="$1"; shift
+  local type="" label="" limit="10"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type) type="$2"; shift 2 ;;
+      --label) label="$2"; shift 2 ;;
+      --limit) limit="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  local body
+  body=$(jq -n --arg q "$query" --arg t "$type" --arg l "$label" --argjson lim "$limit" '{
+    query: $q,
+    limit: $lim,
+    filters: (
+      {}
+      | if $t != "" then .entity_type = $t else . end
+      | if $l != "" then .label = $l else . end
+    )
+  }')
+  curl -s --max-time 5 http://host.docker.internal:3847/api/akiflow/search \
+    -H "Content-Type: application/json" \
+    -d "$body" 2>/dev/null
+}
 ```
 
 ## Tasks
@@ -440,7 +469,7 @@ akiflow:get-task() {
 akiflow:search-tasks() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow:search-tasks '<query>' [--format json] [--limit N]"
-    echo "Search active tasks by title (case-insensitive). Use | for OR: 'tax|IRS|filing'"
+    echo "Hybrid semantic + keyword search for active tasks. Use | for OR in keyword fallback: 'tax|IRS|filing'"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -449,13 +478,42 @@ akiflow:search-tasks() {
     return 1
   fi
   local query="$1"; shift
+  local format="markdown" limit=""
   local flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      --format) format="$2"; flags+=("$1" "$2"); shift 2 ;;
+      --limit) limit="$2"; flags+=("$1" "$2"); shift 2 ;;
       *) shift ;;
     esac
   done
+
+  # Try hybrid search via RAG (skip if AKIFLOW_SKIP_RAG is set)
+  local rag_args=(--type task)
+  [[ -n "$limit" ]] && rag_args+=(--limit "$limit")
+  local response=""
+  if [[ -z "${AKIFLOW_SKIP_RAG:-}" ]]; then
+    response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+  fi
+  if [[ -n "$response" ]] && echo "$response" | jq -e '.results' >/dev/null 2>&1; then
+    local count
+    count=$(echo "$response" | jq '.total')
+    if [[ "$count" == "0" ]]; then
+      echo "No tasks match '$query'."
+      return 0
+    fi
+    if [[ "$format" == "json" ]]; then
+      echo "$response" | jq '.results'
+    else
+      echo "$response" | jq -r '
+        .results[] |
+        "| \(.title) | \(.status) | \(.label // "-") | \(.org // "-") | \(.scheduled_date // "-") | \(.priority) | \(.entity_id) |"
+      ' | (echo "| title | status | label | org | scheduled_date | priority | id |"; echo "|-------|--------|-------|-----|----------------|----------|-----|"; cat)
+    fi
+    return 0
+  fi
+
+  # Fallback: keyword-only search via SQLite
   local where_clause=""
   IFS='|' read -ra terms <<< "$query"
   for term in "${terms[@]}"; do
@@ -466,11 +524,8 @@ akiflow:search-tasks() {
     escaped=$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
     if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
     if [[ ${#escaped} -le 3 ]]; then
-      # Short keyword: word-boundary match (space or start/end) to reduce false positives.
-      # Matches exact word + common suffixes (s, es, ed, ing) but not unrelated longer words.
       where_clause="${where_clause}(' ' || lower(title) || ' ' LIKE '% ${escaped} %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}s %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}es %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ed %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ing %')"
     else
-      # Longer keyword: substring match (false positives are rare)
       where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
     fi
   done
@@ -851,7 +906,7 @@ akiflow:list-events 2026-03-15 2026-03-21
 akiflow:search-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: akiflow:search-events '<query>' [--format json] [--limit N]"
-    echo "Search events by title (case-insensitive). Use | for OR: 'standup|meeting'"
+    echo "Hybrid semantic + keyword search for events. Use | for OR in keyword fallback: 'standup|meeting'"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -860,13 +915,42 @@ akiflow:search-events() {
     return 1
   fi
   local query="$1"; shift
+  local format="markdown" limit=""
   local flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      --format) format="$2"; flags+=("$1" "$2"); shift 2 ;;
+      --limit) limit="$2"; flags+=("$1" "$2"); shift 2 ;;
       *) shift ;;
     esac
   done
+
+  # Try hybrid search via RAG (skip if AKIFLOW_SKIP_RAG is set)
+  local rag_args=(--type event)
+  [[ -n "$limit" ]] && rag_args+=(--limit "$limit")
+  local response=""
+  if [[ -z "${AKIFLOW_SKIP_RAG:-}" ]]; then
+    response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+  fi
+  if [[ -n "$response" ]] && echo "$response" | jq -e '.results' >/dev/null 2>&1; then
+    local count
+    count=$(echo "$response" | jq '.total')
+    if [[ "$count" == "0" ]]; then
+      echo "No events match '$query'."
+      return 0
+    fi
+    if [[ "$format" == "json" ]]; then
+      echo "$response" | jq '.results'
+    else
+      echo "$response" | jq -r '
+        .results[] |
+        "| \(.start_time // "-") | \(.title) | \(.account // "-") | \(.status) | \(.score) | \(.entity_id) |"
+      ' | (echo "| start | title | account | status | score | id |"; echo "|-------|-------|---------|--------|-------|-----|"; cat)
+    fi
+    return 0
+  fi
+
+  # Fallback: keyword-only search via SQLite
   local where_clause=""
   IFS='|' read -ra terms <<< "$query"
   for term in "${terms[@]}"; do
@@ -877,11 +961,8 @@ akiflow:search-events() {
     escaped=$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]' | sed "s/'/''/g")
     if [[ -n "$where_clause" ]]; then where_clause="$where_clause OR "; fi
     if [[ ${#escaped} -le 3 ]]; then
-      # Short keyword: word-boundary match (space or start/end) to reduce false positives.
-      # Matches exact word + common suffixes (s, es, ed, ing) but not unrelated longer words.
       where_clause="${where_clause}(' ' || lower(title) || ' ' LIKE '% ${escaped} %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}s %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}es %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ed %' OR ' ' || lower(title) || ' ' LIKE '% ${escaped}ing %')"
     else
-      # Longer keyword: substring match (false positives are rare)
       where_clause="${where_clause}lower(title) LIKE '%${escaped}%'"
     fi
   done
@@ -1155,27 +1236,132 @@ akiflow:list-slots-today() {
 ```bash
 akiflow:stats() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:stats"
+    echo "Usage: akiflow:stats [--by label|org|priority|status] [--label <name>] [--org <name>]"
     echo "Show task and event counts."
+    echo "  --by <dim>     Pivot counts by label, org, priority, or status"
+    echo "  --label <name> Filter to a specific label"
+    echo "  --org <name>   Filter to a specific org"
     return 0
   fi
-  local today
+  local today by="" filter_label="" filter_org=""
   today=$(date +%Y-%m-%d)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --by) by="$2"; shift 2 ;;
+      --label) filter_label="$2"; shift 2 ;;
+      --org) filter_org="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # Build optional WHERE filter (task_stats already filters done=0, deleted_at IS NULL)
+  local filter=""
+  if [[ -n "$filter_label" ]]; then
+    local safe_label="${filter_label//'/''}"
+    filter="$filter AND label = '$safe_label'"
+  fi
+  if [[ -n "$filter_org" ]]; then
+    local safe_org="${filter_org//'/''}"
+    filter="$filter AND org = '$safe_org'"
+  fi
+
+  if [[ -n "$by" ]]; then
+    # Validate and map dimension to task_stats column
+    local col
+    case "$by" in
+      label|org|status) col="$by" ;;
+      priority) col="priority_label" ;;
+      *) echo "Error: --by must be label, org, priority, or status" >&2; return 1 ;;
+    esac
+
+    sqlite3 -markdown "$AKIFLOW_DB" "
+      SELECT $col as $by,
+        SUM(CASE WHEN scheduled_date < '$today' THEN 1 ELSE 0 END) as overdue,
+        SUM(CASE WHEN scheduled_date = '$today' THEN 1 ELSE 0 END) as today,
+        SUM(CASE WHEN scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') THEN 1 ELSE 0 END) as upcoming_7d,
+        SUM(CASE WHEN status = 'inbox' THEN 1 ELSE 0 END) as inbox,
+        SUM(CASE WHEN status = 'someday' THEN 1 ELSE 0 END) as someday,
+        count(*) as total
+      FROM task_stats
+      WHERE 1=1 $filter
+      GROUP BY $col
+      ORDER BY total DESC"
+  else
+    # Flat counts (original behavior) with optional filter
+    sqlite3 "$AKIFLOW_DB" "
+      SELECT
+        'Overdue: '     || SUM(CASE WHEN scheduled_date < '$today' THEN 1 ELSE 0 END),
+        'Today: '       || SUM(CASE WHEN scheduled_date = '$today' THEN 1 ELSE 0 END),
+        'Upcoming 7d: ' || SUM(CASE WHEN scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') THEN 1 ELSE 0 END),
+        'Inbox: '       || SUM(CASE WHEN status = 'inbox' THEN 1 ELSE 0 END),
+        'Someday: '     || SUM(CASE WHEN status = 'someday' THEN 1 ELSE 0 END)
+      FROM task_stats
+      WHERE 1=1 $filter" | tr '|' '\n'
+  fi
+
+  # Event counts always appended
+  echo ""
   sqlite3 "$AKIFLOW_DB" "
     SELECT
-      'Overdue: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Today: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date = '$today' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Upcoming 7d: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Inbox: ' || (SELECT count(*) FROM tasks_display WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Someday: ' || (SELECT count(*) FROM tasks_display WHERE status = 'someday' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
       'Events today: ' || (SELECT count(*) FROM events_view WHERE start >= '$today' AND start < date('$today', '+1 day'))
     UNION ALL SELECT
       'Events this week: ' || (SELECT count(*) FROM events_view WHERE start >= date('$today', '-' || (strftime('%w','$today')) || ' days') AND start < date('$today', '-' || (strftime('%w','$today')) || ' days', '+7 days'))"
+}
+```
+
+## Unified Search
+
+### Search across tasks and events (hybrid keyword + semantic)
+```bash
+akiflow:search() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: akiflow:search '<query>' [--type task|event] [--label <label>] [--limit N]"
+    echo "Hybrid keyword + semantic search across tasks and events."
+    echo "Falls back to keyword-only if RAG service is unreachable."
+    return 0
+  fi
+  if [[ -z "${1:-}" ]]; then
+    echo "Error: missing search query" >&2
+    echo "Usage: akiflow:search '<query>'" >&2
+    return 1
+  fi
+  local query="$1"; shift
+  local type="" label="" limit="10"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type) type="$2"; shift 2 ;;
+      --label) label="$2"; shift 2 ;;
+      --limit) limit="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # Try hybrid search via RAG
+  local rag_args=()
+  [[ -n "$type" ]] && rag_args+=(--type "$type")
+  [[ -n "$label" ]] && rag_args+=(--label "$label")
+  rag_args+=(--limit "$limit")
+  local response
+  response=$(_akiflow_rag_search "$query" "${rag_args[@]}")
+
+  if [[ -n "$response" ]] && echo "$response" | jq -e '.results' >/dev/null 2>&1; then
+    local count
+    count=$(echo "$response" | jq '.total')
+    if [[ "$count" == "0" ]]; then
+      echo "No results for '$query'."
+      return 0
+    fi
+    echo "Found $count results for '$query':"
+    echo "$response" | jq -r '
+      .results[] |
+      "| \(.entity_type) | \(.title) | \(.scheduled_date // .start_time // "-") | \(.status) | \(.label // .account // "-") | \(.score) | \(.entity_id) |"
+    ' | (echo "| type | title | date | status | label | score | id |"; echo "|------|-------|------|--------|-------|-------|-----|"; cat)
+  else
+    # Fallback: keyword-only search via SQLite (skip further RAG attempts)
+    echo "(RAG service unavailable — falling back to keyword search)"
+    AKIFLOW_SKIP_RAG=1 akiflow:search-tasks "$query"
+    AKIFLOW_SKIP_RAG=1 akiflow:search-events "$query"
+  fi
 }
 ```
 
