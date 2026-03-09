@@ -144,6 +144,17 @@ Rebuild both as pure deltas. Fix manifest (add orphaned files).
 container-runner.ts: keep only Akiflow DB mount + AKIFLOW_DB env var
 Dockerfile: keep only sqlite3, jq, akiflow CLI install
 
+## Pre-Applied Overlay State (from self-review)
+
+The baseline commit (`f567f81`) captured some files with skill overlays already applied:
+- `container/agent-runner/src/ipc-mcp-stdio.ts` — has reactions+whatsapp-replies overlays pre-applied, diverges from upstream by 403 lines. Phase 4 must reset this to upstream and let overlays re-apply.
+- `container/Dockerfile` — has google-home/akiflow additions baked in. Should be reset to upstream and let skill overlays handle additions.
+- `.env.example` — has fork-specific entries. Low priority, leave as-is.
+
+## add-compact Skill (from upstream, not installed)
+
+Upstream's merge brought in `.claude/skills/add-compact/` which modifies `src/index.ts` and `container/agent-runner/src/index.ts` (both hot files). It is NOT in `installed-skills.yaml` so it was correctly excluded from forensic analysis. If installed later, its overlays may conflict with rebuilt overlays for Group A (src/index.ts). No action needed now — just awareness.
+
 ## Hot File Rebuild Order
 
 Skills must be rebuilt in groups based on shared files, applying sequentially within each group:
