@@ -1236,24 +1236,73 @@ akiflow:list-slots-today() {
 ```bash
 akiflow:stats() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:stats"
+    echo "Usage: akiflow:stats [--by label|org|priority|status] [--label <name>] [--org <name>]"
     echo "Show task and event counts."
+    echo "  --by <dim>     Pivot counts by label, org, priority, or status"
+    echo "  --label <name> Filter to a specific label"
+    echo "  --org <name>   Filter to a specific org"
     return 0
   fi
-  local today
+  local today by="" filter_label="" filter_org=""
   today=$(date +%Y-%m-%d)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --by) by="$2"; shift 2 ;;
+      --label) filter_label="$2"; shift 2 ;;
+      --org) filter_org="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # Build optional WHERE filter (task_stats already filters done=0, deleted_at IS NULL)
+  local filter=""
+  if [[ -n "$filter_label" ]]; then
+    local safe_label="${filter_label//\'/\'\'}"
+    filter="$filter AND label = '$safe_label'"
+  fi
+  if [[ -n "$filter_org" ]]; then
+    local safe_org="${filter_org//\'/\'\'}"
+    filter="$filter AND org = '$safe_org'"
+  fi
+
+  if [[ -n "$by" ]]; then
+    # Validate and map dimension to task_stats column
+    local col
+    case "$by" in
+      label|org|status) col="$by" ;;
+      priority) col="priority_label" ;;
+      *) echo "Error: --by must be label, org, priority, or status" >&2; return 1 ;;
+    esac
+
+    sqlite3 -markdown "$AKIFLOW_DB" "
+      SELECT $col as $by,
+        SUM(CASE WHEN scheduled_date < '$today' THEN 1 ELSE 0 END) as overdue,
+        SUM(CASE WHEN scheduled_date = '$today' THEN 1 ELSE 0 END) as today,
+        SUM(CASE WHEN scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') THEN 1 ELSE 0 END) as upcoming_7d,
+        SUM(CASE WHEN status = 'inbox' THEN 1 ELSE 0 END) as inbox,
+        SUM(CASE WHEN status = 'someday' THEN 1 ELSE 0 END) as someday,
+        count(*) as total
+      FROM task_stats
+      WHERE 1=1 $filter
+      GROUP BY $col
+      ORDER BY total DESC"
+  else
+    # Flat counts (original behavior) with optional filter
+    sqlite3 "$AKIFLOW_DB" "
+      SELECT
+        'Overdue: '     || SUM(CASE WHEN scheduled_date < '$today' THEN 1 ELSE 0 END),
+        'Today: '       || SUM(CASE WHEN scheduled_date = '$today' THEN 1 ELSE 0 END),
+        'Upcoming 7d: ' || SUM(CASE WHEN scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') THEN 1 ELSE 0 END),
+        'Inbox: '       || SUM(CASE WHEN status = 'inbox' THEN 1 ELSE 0 END),
+        'Someday: '     || SUM(CASE WHEN status = 'someday' THEN 1 ELSE 0 END)
+      FROM task_stats
+      WHERE 1=1 $filter" | tr '|' '\n'
+  fi
+
+  # Event counts always appended
+  echo ""
   sqlite3 "$AKIFLOW_DB" "
     SELECT
-      'Overdue: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date < '$today' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Today: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date = '$today' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Upcoming 7d: ' || (SELECT count(*) FROM tasks_display WHERE scheduled_date > '$today' AND scheduled_date <= date('$today', '+7 days') AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Inbox: ' || (SELECT count(*) FROM tasks_display WHERE status = 'inbox' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
-      'Someday: ' || (SELECT count(*) FROM tasks_display WHERE status = 'someday' AND done = 0 AND deleted_at IS NULL)
-    UNION ALL SELECT
       'Events today: ' || (SELECT count(*) FROM events_view WHERE start >= '$today' AND start < date('$today', '+1 day'))
     UNION ALL SELECT
       'Events this week: ' || (SELECT count(*) FROM events_view WHERE start >= date('$today', '-' || (strftime('%w','$today')) || ' days') AND start < date('$today', '-' || (strftime('%w','$today')) || ' days', '+7 days'))"
