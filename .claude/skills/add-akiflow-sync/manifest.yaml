@@ -9,11 +9,7 @@ adds:
 modifies:
   - src/container-runner.ts
   - container/Dockerfile
-modify_base:
-  src/container-runner.ts: _accumulated
-  container/Dockerfile: _accumulated
 depends:
-  - auth-recovery
   - container-hardening
 structured:
   env_additions:

@@ -16,17 +16,6 @@ modifies:
   - src/ipc.ts
   - src/router.ts
   - src/types.ts
-modify_base:
-  container/agent-runner/src/ipc-mcp-stdio.ts: _accumulated
-  rag-system/src/ingestion.ts: _accumulated
-  src/channels/whatsapp.test.ts: _accumulated
-  src/channels/whatsapp.ts: _accumulated
-  src/db.test.ts: _accumulated
-  src/db.ts: group-lifecycle
-  src/formatting.test.ts: _accumulated
-  src/ipc.ts: _accumulated
-  src/router.ts: _accumulated
-  src/types.ts: _accumulated
 conflicts: []
 depends:
   - whatsapp-search

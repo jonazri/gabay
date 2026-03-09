@@ -6,8 +6,6 @@ adds: []
 modifies:
   - src/group-queue.ts
   - src/container-runner.ts
-modify_base:
-  src/container-runner.ts: google-home
 conflicts: []
 depends: []
 test: "npx tsc --noEmit"
