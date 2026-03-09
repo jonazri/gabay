@@ -48,13 +48,15 @@ export function collectTransforms(
     }
   }
 
-  // Check for circular transforms (A transforms B and B transforms A)
+  // Check for direct mutual transforms (A transforms B and B transforms A).
+  // Longer cycles (A→B→C→A) are not checked — skills apply in linear order
+  // defined in installed-skills.yaml, so only direct pairs are meaningful.
   for (const [target, transforms] of Object.entries(result)) {
     for (const t of transforms) {
       const targetManifest = manifests[target];
       if (targetManifest?.transforms?.[t.sourceSkill]) {
         throw new Error(
-          `Circular transforms: "${t.sourceSkill}" transforms "${target}" and "${target}" transforms "${t.sourceSkill}"`,
+          `Mutual transforms: "${t.sourceSkill}" transforms "${target}" and "${target}" transforms "${t.sourceSkill}"`,
         );
       }
     }

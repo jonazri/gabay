@@ -200,9 +200,15 @@ export async function replaySkills(
       // (these should not be looked up in the skill's own modify/ dir)
       const transformOverlayFiles = new Set<string>();
       if (transforms) {
+        const effectiveModifies = new Set(manifest.modifies);
         for (const ct of transforms) {
           if (ct.transform.overlay_files) {
             for (const f of ct.transform.overlay_files) {
+              if (!effectiveModifies.has(f)) {
+                throw new Error(
+                  `Transform from "${ct.sourceSkill}" declares overlay_files entry "${f}" for target "${skillName}" but it is not in the effective modifies list. Add it via add_modifies in manifest_patches.`,
+                );
+              }
               transformOverlayFiles.add(f);
             }
           }

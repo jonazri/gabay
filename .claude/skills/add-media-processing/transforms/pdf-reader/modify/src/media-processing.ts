@@ -51,12 +51,14 @@ export async function processMediaAttachment(
           buffer as Buffer,
           { flag: 'wx' },
         );
-      } catch {
+      } catch (writeErr: any) {
+        if (writeErr?.code !== 'EEXIST') throw writeErr;
         // On EEXIST, append random suffix
         filename = `${safeStem}-${msgId}-${Math.random().toString(36).slice(2, 6)}.pdf`;
         await fs.promises.writeFile(
           path.join(attachDir, filename),
           buffer as Buffer,
+          { flag: 'wx' },
         );
       }
       const sizeKB = Math.round((buffer as Buffer).length / 1024);

@@ -45,16 +45,19 @@ export function readManifest(skillDir: string): SkillManifest {
     }
   }
 
-  // Validate transform overlay paths
+  // Validate transform paths (overlay_files, add_modifies, remove_modifies)
   if (manifest.transforms) {
     for (const [target, transform] of Object.entries(manifest.transforms)) {
-      if (transform.overlay_files) {
-        for (const p of transform.overlay_files) {
-          if (p.includes('..') || path.isAbsolute(p)) {
-            throw new Error(
-              `Invalid transform overlay path for target "${target}": ${p} (must be relative without "..")`,
-            );
-          }
+      const transformPaths = [
+        ...(transform.overlay_files || []),
+        ...(transform.manifest_patches?.add_modifies || []),
+        ...(transform.manifest_patches?.remove_modifies || []),
+      ];
+      for (const p of transformPaths) {
+        if (p.includes('..') || path.isAbsolute(p)) {
+          throw new Error(
+            `Invalid transform path for target "${target}": ${p} (must be relative without "..")`,
+          );
         }
       }
     }

@@ -109,7 +109,7 @@ describe('collectTransforms', () => {
         { 'skill-a': '/a', 'skill-b': '/b' },
         manifests,
       ),
-    ).toThrow('Circular transforms');
+    ).toThrow('Mutual transforms');
   });
 
   it('collects multiple transforms for same target', () => {
