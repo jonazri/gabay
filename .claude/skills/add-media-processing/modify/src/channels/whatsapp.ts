@@ -15,10 +15,10 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
-  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { processMediaAttachment } from '../media-processing.js';
 import {
@@ -213,7 +213,7 @@ export class WhatsAppChannel implements Channel {
               '';
 
             // Process media attachments (images, PDFs, etc.)
-            const groupDir = path.join(GROUPS_DIR, groups[chatJid].folder);
+            const groupDir = resolveGroupFolderPath(groups[chatJid].folder);
             const mediaResult = await processMediaAttachment(msg, normalized, groupDir);
             if (mediaResult) content = mediaResult.content;
 

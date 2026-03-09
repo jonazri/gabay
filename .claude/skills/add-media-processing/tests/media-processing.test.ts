@@ -46,7 +46,7 @@ describe('media-processing skill package', () => {
     const content = fs.readFileSync(overlayPath, 'utf-8');
     // Delta changes
     expect(content).toContain("import { processMediaAttachment } from '../media-processing.js';");
-    expect(content).toContain('GROUPS_DIR');
+    expect(content).toContain('resolveGroupFolderPath');
     expect(content).toContain('let content =');
     expect(content).toContain('processMediaAttachment(msg, normalized, groupDir)');
 

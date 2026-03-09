@@ -1,15 +1,14 @@
 # whatsapp.ts overlay intent — media-processing skill
 
 ## What changed
-- Added `GROUPS_DIR` to config import
+- Added `resolveGroupFolderPath` import from `../group-folder.js`
 - Added `processMediaAttachment` import from `../media-processing.js`
 - Changed `const content` to `let content` (allows media handlers to override)
-- Added `processMediaAttachment()` call after text extraction, before `!content` guard
+- Added `processMediaAttachment()` call with `resolveGroupFolderPath()` after text extraction, before `!content` guard
 
 ## Key sections
-- **Config import block**: Added GROUPS_DIR
-- **Module imports**: Added media-processing import
-- **messages.upsert handler**: Changed const→let, added processMediaAttachment call
+- **Module imports**: Added group-folder and media-processing imports
+- **messages.upsert handler**: Changed const→let, added processMediaAttachment call with resolveGroupFolderPath
 
 ## Invariants (must-keep)
 - Connection lifecycle (connect, reconnect, disconnect)
