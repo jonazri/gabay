@@ -233,8 +233,12 @@ export async function startIndexer(db: Database.Database): Promise<void> {
       for (const [table, ids] of pendingIndex.entries()) {
         if (ids.size === 0) continue;
         const batch = [...ids].slice(0, BATCH_SIZE);
-        await processBatch(db, openai, qdrant, table, batch);
-        batch.forEach((id) => ids.delete(id));
+        try {
+          await processBatch(db, openai, qdrant, table, batch);
+          batch.forEach((id) => ids.delete(id));
+        } catch (err) {
+          logger.error(`[indexer] failed to process ${table} batch: ${err}`);
+        }
         if (ids.size === 0) pendingIndex.delete(table);
       }
     } catch (err) {

@@ -180,10 +180,11 @@ app.post('/api/akiflow/search', async (req: Request, res: Response) => {
       const result = await akiflowSearch(akiflowQdrant, akiflowOpenai, akiflowDb, req.body);
       res.json(result);
     } finally {
-      akiflowDb?.close();
+      try { akiflowDb?.close(); } catch { /* ignore close errors */ }
     }
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    console.error('Akiflow search error:', err);
+    res.status(500).json({ error: 'Akiflow search failed' });
   }
 });
 
