@@ -18,6 +18,11 @@ import {
   mergeNpmDependencies,
   runNpmInstall,
 } from '../skills-engine/structured.js';
+import {
+  applyManifestPatches,
+  collectTransforms,
+} from '../skills-engine/transforms.js';
+import { SkillManifest } from '../skills-engine/types.js';
 
 const INSTALLED_SKILLS_PATH = '.nanoclaw/installed-skills.yaml';
 
@@ -178,11 +183,33 @@ async function main() {
     process.exit(1);
   }
 
-  // Record each applied skill in state.yaml so clean-skills can undo them
+  // Record each applied skill in state.yaml so clean-skills can undo them.
+  // Use effective (transformed) manifests so file hashes include transform-added files.
   const pathRemap = loadPathRemap();
+  const allManifests: Record<string, SkillManifest> = {};
   for (const skillName of config.skills) {
-    const dir = skillDirs[skillName];
-    const manifest = readManifest(dir);
+    allManifests[skillName] = readManifest(skillDirs[skillName]);
+  }
+  const pendingTransforms = collectTransforms(
+    config.skills,
+    skillDirs,
+    allManifests,
+  );
+
+  for (const skillName of config.skills) {
+    let manifest = allManifests[skillName];
+
+    // Apply transforms to get the effective manifest
+    const transforms = pendingTransforms[skillName];
+    if (transforms && transforms.length > 0) {
+      const patches = transforms
+        .map((ct) => ct.transform.manifest_patches)
+        .filter((p): p is NonNullable<typeof p> => !!p);
+      if (patches.length > 0) {
+        manifest = applyManifestPatches(manifest, patches);
+      }
+    }
+
     const fileHashes: Record<string, string> = {};
     for (const f of [...manifest.adds, ...manifest.modifies]) {
       const resolvedPath = resolvePathRemap(f, pathRemap);

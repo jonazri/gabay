@@ -39,7 +39,27 @@ export function readManifest(skillDir: string): SkillManifest {
   const allPaths = [...manifest.adds, ...manifest.modifies];
   for (const p of allPaths) {
     if (p.includes('..') || path.isAbsolute(p)) {
-      throw new Error(`Invalid path in manifest: ${p} (must be relative without "..")`);
+      throw new Error(
+        `Invalid path in manifest: ${p} (must be relative without "..")`,
+      );
+    }
+  }
+
+  // Validate transform paths (overlay_files, add_modifies, remove_modifies)
+  if (manifest.transforms) {
+    for (const [target, transform] of Object.entries(manifest.transforms)) {
+      const transformPaths = [
+        ...(transform.overlay_files || []),
+        ...(transform.manifest_patches?.add_modifies || []),
+        ...(transform.manifest_patches?.remove_modifies || []),
+      ];
+      for (const p of transformPaths) {
+        if (p.includes('..') || path.isAbsolute(p)) {
+          throw new Error(
+            `Invalid transform path for target "${target}": ${p} (must be relative without "..")`,
+          );
+        }
+      }
     }
   }
 
@@ -78,7 +98,10 @@ export function checkSystemVersion(manifest: SkillManifest): {
   if (!manifest.min_skills_system_version) {
     return { ok: true };
   }
-  const cmp = compareSemver(manifest.min_skills_system_version, SKILLS_SCHEMA_VERSION);
+  const cmp = compareSemver(
+    manifest.min_skills_system_version,
+    SKILLS_SCHEMA_VERSION,
+  );
   if (cmp > 0) {
     return {
       ok: false,
