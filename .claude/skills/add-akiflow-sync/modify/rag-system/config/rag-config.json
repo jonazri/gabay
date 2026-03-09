@@ -20,8 +20,7 @@
   },
   "ingestion": {
     "batchSize": 100,
-    "pollIntervalMs": 300000,
-    "nanoclawDbPath": "/home/yaz/code/yonibot/gabay/store/messages.db"
+    "pollIntervalMs": 300000
   },
   "akiflow": {
     "collection": "akiflow_entities",
