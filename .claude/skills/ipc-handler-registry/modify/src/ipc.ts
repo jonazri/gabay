@@ -10,6 +10,10 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 import { getIpcHandler } from './ipc-handlers.js';
+import {
+  writeIpcNotification,
+  writeIpcErrorResponse,
+} from './ipc-self-heal.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -165,6 +169,7 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    requestId?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -237,18 +242,20 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
+          const date = new Date(data.schedule_value);
+          if (isNaN(date.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
             break;
           }
-          nextRun = scheduled.toISOString();
+          nextRun = date.toISOString();
         }
 
-        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskId =
+          data.taskId ||
+          `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const contextMode =
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
@@ -326,6 +333,70 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'update_task':
+      if (data.taskId) {
+        const task = getTaskById(data.taskId);
+        if (!task) {
+          logger.warn(
+            { taskId: data.taskId, sourceGroup },
+            'Task not found for update',
+          );
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
+          logger.warn(
+            { taskId: data.taskId, sourceGroup },
+            'Unauthorized task update attempt',
+          );
+          break;
+        }
+
+        const updates: Parameters<typeof updateTask>[1] = {};
+        if (data.prompt !== undefined) updates.prompt = data.prompt;
+        if (data.schedule_type !== undefined)
+          updates.schedule_type = data.schedule_type as
+            | 'cron'
+            | 'interval'
+            | 'once';
+        if (data.schedule_value !== undefined)
+          updates.schedule_value = data.schedule_value;
+
+        // Recompute next_run if schedule changed
+        if (data.schedule_type || data.schedule_value) {
+          const updatedTask = {
+            ...task,
+            ...updates,
+          };
+          if (updatedTask.schedule_type === 'cron') {
+            try {
+              const interval = CronExpressionParser.parse(
+                updatedTask.schedule_value,
+                { tz: TIMEZONE },
+              );
+              updates.next_run = interval.next().toISOString();
+            } catch {
+              logger.warn(
+                { taskId: data.taskId, value: updatedTask.schedule_value },
+                'Invalid cron in task update',
+              );
+              break;
+            }
+          } else if (updatedTask.schedule_type === 'interval') {
+            const ms = parseInt(updatedTask.schedule_value, 10);
+            if (!isNaN(ms) && ms > 0) {
+              updates.next_run = new Date(Date.now() + ms).toISOString();
+            }
+          }
+        }
+
+        updateTask(data.taskId, updates);
+        logger.info(
+          { taskId: data.taskId, sourceGroup, updates },
+          'Task updated via IPC',
+        );
+      }
+      break;
+
     case 'refresh_groups':
       // Only main group can request a refresh
       if (isMain) {
@@ -387,9 +458,44 @@ export async function processTaskIpc(
     default: {
       const handler = getIpcHandler(data.type);
       if (handler) {
-        await handler(data, deps, { sourceGroup, isMain });
+        try {
+          await handler(data, deps, { sourceGroup, isMain });
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          logger.error(
+            { type: data.type, err, sourceGroup },
+            'IPC handler threw an exception',
+          );
+          writeIpcErrorResponse(
+            sourceGroup,
+            data.requestId,
+            'handler_error',
+            data.type,
+            errorMessage,
+          );
+          writeIpcNotification(
+            sourceGroup,
+            'handler_error',
+            data.type,
+            errorMessage,
+          );
+        }
       } else {
+        const errorMessage = `No handler registered for IPC type "${data.type}"`;
         logger.warn({ type: data.type }, 'Unknown IPC task type');
+        writeIpcErrorResponse(
+          sourceGroup,
+          data.requestId,
+          'unknown_ipc_type',
+          data.type,
+          errorMessage,
+        );
+        writeIpcNotification(
+          sourceGroup,
+          'unknown_ipc_type',
+          data.type,
+          errorMessage,
+        );
       }
     }
   }

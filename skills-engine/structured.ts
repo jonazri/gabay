@@ -193,57 +193,6 @@ export function mergeDockerComposeServices(
   fs.writeFileSync(composePath, stringify(compose), 'utf-8');
 }
 
-export function mergeContainerSecrets(
-  containerRunnerPath: string,
-  secrets: string[],
-): void {
-  if (secrets.length === 0) return;
-
-  const content = fs.readFileSync(containerRunnerPath, 'utf-8');
-  const lines = content.split('\n');
-
-  // Find the readEnvFile([ ... ]) call
-  let arrayStartLine = -1;
-  let arrayEndLine = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('readEnvFile([')) {
-      arrayStartLine = i;
-    }
-    if (
-      arrayStartLine !== -1 &&
-      arrayEndLine === -1 &&
-      lines[i].includes(']);')
-    ) {
-      arrayEndLine = i;
-      break;
-    }
-  }
-
-  if (arrayStartLine === -1 || arrayEndLine === -1) {
-    throw new Error(
-      `Could not find readEnvFile([...]) pattern in ${containerRunnerPath}`,
-    );
-  }
-
-  // Parse existing keys from the array
-  const existingKeys = new Set<string>();
-  for (let i = arrayStartLine; i <= arrayEndLine; i++) {
-    const match = lines[i].match(/'([^']+)'/);
-    if (match) existingKeys.add(match[1]);
-  }
-
-  // Filter to only new keys, deduplicating the input array
-  const newKeys = [...new Set(secrets)].filter((k) => !existingKeys.has(k));
-  if (newKeys.length === 0) return;
-
-  // Insert new keys before the closing ]);
-  const indent = '    ';
-  const newLines = newKeys.map((k) => `${indent}'${k}',`);
-  lines.splice(arrayEndLine, 0, ...newLines);
-
-  fs.writeFileSync(containerRunnerPath, lines.join('\n'), 'utf-8');
-}
-
 export function runNpmInstall(): void {
   execSync('npm install --legacy-peer-deps', {
     stdio: 'inherit',

@@ -35,8 +35,8 @@ Full task and calendar management via a local SQLite database kept in sync by th
 | **Time Slots** | Calendar containers for activity types (e.g., "Deep Work", "Admin"). Hold tasks, not events. Tasks reference them via `time_slot_id`. |
 | **Events** | Calendar events (meetings, appointments) from connected Google/Outlook accounts. |
 
-**Always call `akiflow:list-labels` first** if you need to assign a project or tag — you need the UUID.
-**Always call `akiflow:list-calendars` first** if you need to create an event — you need the `calendarId`.
+**Always call `akiflow list-labels` first** if you need to assign a project or tag — you need the UUID.
+**Always call `akiflow list-calendars` first** if you need to create an event — you need the `calendarId`.
 
 The `AKIFLOW_DB` environment variable points to the local SQLite database maintained by the akiflow-sync daemon. Reads are instant; writes are queued via `pending_writes` and synced to the server automatically.
 
@@ -103,7 +103,7 @@ _akiflow_rag_search() {
 ```bash
 akiflow:daily-brief() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:daily-brief"
+    echo "Usage: akiflow daily-brief"
     echo "Show today's events, tasks, overdue summary, and inbox in one view."
     return 0
   fi
@@ -174,7 +174,7 @@ akiflow:daily-brief() {
 ```bash
 akiflow:weekly-plan() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:weekly-plan"
+    echo "Usage: akiflow weekly-plan"
     echo "Show this week's events and tasks, next week's events, overdue summary, and inbox."
     return 0
   fi
@@ -266,7 +266,7 @@ akiflow:weekly-plan() {
 ```bash
 akiflow:list-all() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-all [--format json] [--limit N]"
+    echo "Usage: akiflow list-all [--format json] [--limit N]"
     echo "List all active tasks (inbox, planned, snoozed, someday)."
     return 0
   fi
@@ -290,7 +290,7 @@ akiflow:list-all() {
 ```bash
 akiflow:list-inbox() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-inbox [--format json] [--limit N]"
+    echo "Usage: akiflow list-inbox [--format json] [--limit N]"
     echo "List inbox tasks (unscheduled)."
     return 0
   fi
@@ -313,7 +313,7 @@ akiflow:list-inbox() {
 ```bash
 akiflow:list-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-today [--format json] [--limit N]"
+    echo "Usage: akiflow list-today [--format json] [--limit N]"
     echo "List tasks scheduled for today."
     return 0
   fi
@@ -326,7 +326,7 @@ akiflow:list-today() {
   done
   local today
   today=$(date +%Y-%m-%d)
-  _akiflow_query "No tasks scheduled for today. (Use akiflow:list-overdue for past-due tasks.)" "
+  _akiflow_query "No tasks scheduled for today. (Use akiflow list-overdue for past-due tasks.)" "
     SELECT title, status, label, org, datetime, priority, id
     FROM tasks_display
     WHERE scheduled_date = '$today'
@@ -339,7 +339,7 @@ akiflow:list-today() {
 ```bash
 akiflow:list-overdue() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-overdue [--format json] [--limit N]"
+    echo "Usage: akiflow list-overdue [--format json] [--limit N]"
     echo "List tasks with scheduled dates in the past."
     return 0
   fi
@@ -383,7 +383,7 @@ akiflow:list-overdue() {
 ```bash
 akiflow:list-upcoming() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-upcoming [days] [--format json] [--limit N]"
+    echo "Usage: akiflow list-upcoming [days] [--format json] [--limit N]"
     echo "List tasks scheduled within the next N days (default: 7, max: 365)."
     return 0
   fi
@@ -418,7 +418,7 @@ akiflow:list-upcoming() {
 ```bash
 akiflow:list-someday() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-someday [--format json] [--limit N]"
+    echo "Usage: akiflow list-someday [--format json] [--limit N]"
     echo "List someday tasks (no date, no active pressure)."
     return 0
   fi
@@ -441,13 +441,13 @@ akiflow:list-someday() {
 ```bash
 akiflow:get-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:get-task <id>"
+    echo "Usage: akiflow get-task <id>"
     echo "Get the full raw JSON data for a single task."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing task ID" >&2
-    echo "Usage: akiflow:get-task <id>" >&2
+    echo "Usage: akiflow get-task <id>" >&2
     return 1
   fi
   local id="$1"
@@ -468,13 +468,13 @@ akiflow:get-task() {
 ```bash
 akiflow:search-tasks() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:search-tasks '<query>' [--format json] [--limit N]"
+    echo "Usage: akiflow search-tasks '<query>' [--format json] [--limit N]"
     echo "Hybrid semantic + keyword search for active tasks. Use | for OR in keyword fallback: 'tax|IRS|filing'"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing search query" >&2
-    echo "Usage: akiflow:search-tasks '<query>'" >&2
+    echo "Usage: akiflow search-tasks '<query>'" >&2
     return 1
   fi
   local query="$1"; shift
@@ -556,7 +556,7 @@ Pass a JSON object. Required: `title`. Optional fields:
 ```bash
 akiflow:create-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:create-task '<json>'"
+    echo "Usage: akiflow create-task '<json>'"
     echo "Create a new task. Required: title. Optional: status (1=inbox,2=planned,7=someday), date, datetime, duration, priority (0-4), listId, tags_ids, description, origin_url."
     echo "Status codes: 1=inbox, 2=planned, 3=completed, 4=snoozed, 5=archived, 6=deleted, 7=someday"
     echo "Priority: 0=none, 1=low, 2=medium, 3=high, 4=goal"
@@ -564,7 +564,7 @@ akiflow:create-task() {
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing JSON argument" >&2
-    echo "Usage: akiflow:create-task '<json>'" >&2
+    echo "Usage: akiflow create-task '<json>'" >&2
     return 1
   fi
   local json="$1"
@@ -599,10 +599,10 @@ akiflow:create-task() {
 **Examples:**
 ```bash
 # Quick inbox capture
-akiflow:create-task '{"title": "Buy groceries"}'
+akiflow create-task '{"title": "Buy groceries"}'
 
 # Planned for a date with priority and project
-akiflow:create-task '{"title": "Review PR", "date": "2026-03-03", "status": 2, "priority": 2, "listId": "project-uuid"}'
+akiflow create-task '{"title": "Review PR", "date": "2026-03-03", "status": 2, "priority": 2, "listId": "project-uuid"}'
 ```
 
 ### Update a task
@@ -612,7 +612,7 @@ Pass the task UUID and a partial JSON object with only the fields to change.
 ```bash
 akiflow:update-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:update-task <id> '<json>'"
+    echo "Usage: akiflow update-task <id> '<json>'"
     echo "Update a task. Pass the task UUID and a partial JSON object with fields to change."
     echo "Status codes: 1=inbox, 2=planned, 3=completed, 4=snoozed, 5=archived, 6=deleted, 7=someday"
     echo "Priority: 0=none, 1=low, 2=medium, 3=high, 4=goal"
@@ -620,12 +620,12 @@ akiflow:update-task() {
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing task ID" >&2
-    echo "Usage: akiflow:update-task <id> '<json>'" >&2
+    echo "Usage: akiflow update-task <id> '<json>'" >&2
     return 1
   fi
   if [[ -z "${2:-}" ]]; then
     echo "Error: missing JSON patch argument" >&2
-    echo "Usage: akiflow:update-task <id> '<json>'" >&2
+    echo "Usage: akiflow update-task <id> '<json>'" >&2
     return 1
   fi
   local id="$1"
@@ -669,26 +669,26 @@ akiflow:update-task() {
 **Examples:**
 ```bash
 # Reschedule to a date
-akiflow:update-task "task-uuid" '{"date": "2026-03-05", "status": 2}'
+akiflow update-task "task-uuid" '{"date": "2026-03-05", "status": 2}'
 
 # Set high priority
-akiflow:update-task "task-uuid" '{"priority": 3}'
+akiflow update-task "task-uuid" '{"priority": 3}'
 
 # Move to someday
-akiflow:update-task "task-uuid" '{"status": 7, "date": null, "datetime": null}'
+akiflow update-task "task-uuid" '{"status": 7, "date": null, "datetime": null}'
 ```
 
 ### Reschedule a task
 ```bash
 akiflow:reschedule-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:reschedule-task <id> <YYYY-MM-DD>"
+    echo "Usage: akiflow reschedule-task <id> <YYYY-MM-DD>"
     echo "Move a task to a new date. Sets status to planned and clears datetime."
     return 0
   fi
   if [[ -z "${1:-}" || -z "${2:-}" ]]; then
     echo "Error: missing id or date" >&2
-    echo "Usage: akiflow:reschedule-task <id> <YYYY-MM-DD>" >&2
+    echo "Usage: akiflow reschedule-task <id> <YYYY-MM-DD>" >&2
     return 1
   fi
   local id="$1" date="$2"
@@ -703,13 +703,13 @@ akiflow:reschedule-task() {
 ```bash
 akiflow:complete-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:complete-task <id>"
+    echo "Usage: akiflow complete-task <id>"
     echo "Mark a task as completed."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing task ID" >&2
-    echo "Usage: akiflow:complete-task <id>" >&2
+    echo "Usage: akiflow complete-task <id>" >&2
     return 1
   fi
   local id="$1"
@@ -745,13 +745,13 @@ akiflow:complete-task() {
 ```bash
 akiflow:delete-task() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:delete-task <id>"
+    echo "Usage: akiflow delete-task <id>"
     echo "Soft-delete a task (sets status to deleted)."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing task ID" >&2
-    echo "Usage: akiflow:delete-task <id>" >&2
+    echo "Usage: akiflow delete-task <id>" >&2
     return 1
   fi
   local id="$1"
@@ -788,7 +788,7 @@ akiflow:delete-task() {
 ```bash
 akiflow:list-labels() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-labels [--format json] [--limit N]"
+    echo "Usage: akiflow list-labels [--format json] [--limit N]"
     echo "List all labels (projects and tags)."
     return 0
   fi
@@ -815,7 +815,7 @@ Response fields: `id`, `title`, `color` (hex), `is_tag` (0=project, 1=tag), `fol
 ```bash
 akiflow:list-calendars() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-calendars [--format json] [--limit N]"
+    echo "Usage: akiflow list-calendars [--format json] [--limit N]"
     echo "List all calendars."
     return 0
   fi
@@ -837,9 +837,9 @@ akiflow:list-calendars() {
 ```bash
 akiflow:list-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-events [period | start-date [end-date]] [--format json] [--limit N]"
+    echo "Usage: akiflow list-events [period | start-date [end-date]] [--format json] [--limit N]"
     echo "List calendar events. Period: today (default), tomorrow, this-week, next-week."
-    echo "Or pass one date (single day) or two dates (range): akiflow:list-events 2026-03-15 2026-03-21"
+    echo "Or pass one date (single day) or two dates (range): akiflow list-events 2026-03-15 2026-03-21"
     return 0
   fi
   local period="today" second_arg="" flags=()
@@ -896,22 +896,22 @@ Modifiers: `today`, `tomorrow`, `this-week`, `next-week`, or explicit dates. The
 
 Examples:
 ```bash
-akiflow:list-events today
-akiflow:list-events next-week
-akiflow:list-events 2026-03-15 2026-03-21
+akiflow list-events today
+akiflow list-events next-week
+akiflow list-events 2026-03-15 2026-03-21
 ```
 
 ### Search events by title
 ```bash
 akiflow:search-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:search-events '<query>' [--format json] [--limit N]"
+    echo "Usage: akiflow search-events '<query>' [--format json] [--limit N]"
     echo "Hybrid semantic + keyword search for events. Use | for OR in keyword fallback: 'standup|meeting'"
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing search query" >&2
-    echo "Usage: akiflow:search-events '<query>'" >&2
+    echo "Usage: akiflow search-events '<query>'" >&2
     return 1
   fi
   local query="$1"; shift
@@ -982,13 +982,13 @@ Events are written to the server directly. Required: `calendarId`, `title`, `sta
 ```bash
 akiflow:create-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:create-event '<json>'"
+    echo "Usage: akiflow create-event '<json>'"
     echo "Create a calendar event. Required: calendarId, title, start, end."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing JSON argument" >&2
-    echo "Usage: akiflow:create-event '<json>'" >&2
+    echo "Usage: akiflow create-event '<json>'" >&2
     return 1
   fi
   local json="$1"
@@ -1025,18 +1025,18 @@ akiflow:create-event() {
 ```bash
 akiflow:update-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:update-event <id> '<json>'"
+    echo "Usage: akiflow update-event <id> '<json>'"
     echo "Update a calendar event. Pass the event UUID and a partial JSON object."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing event ID" >&2
-    echo "Usage: akiflow:update-event <id> '<json>'" >&2
+    echo "Usage: akiflow update-event <id> '<json>'" >&2
     return 1
   fi
   if [[ -z "${2:-}" ]]; then
     echo "Error: missing JSON patch argument" >&2
-    echo "Usage: akiflow:update-event <id> '<json>'" >&2
+    echo "Usage: akiflow update-event <id> '<json>'" >&2
     return 1
   fi
   local id="$1"
@@ -1078,13 +1078,13 @@ akiflow:update-event() {
 ```bash
 akiflow:reschedule-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:reschedule-event <id> <YYYY-MM-DD>"
+    echo "Usage: akiflow reschedule-event <id> <YYYY-MM-DD>"
     echo "Move an event to a new date, preserving the original time-of-day and duration."
     return 0
   fi
   if [[ -z "${1:-}" || -z "${2:-}" ]]; then
     echo "Error: missing id or date" >&2
-    echo "Usage: akiflow:reschedule-event <id> <YYYY-MM-DD>" >&2
+    echo "Usage: akiflow reschedule-event <id> <YYYY-MM-DD>" >&2
     return 1
   fi
   local id="$1" new_date="$2"
@@ -1145,13 +1145,13 @@ akiflow:reschedule-event() {
 ```bash
 akiflow:delete-event() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:delete-event <id>"
+    echo "Usage: akiflow delete-event <id>"
     echo "Delete a calendar event."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing event ID" >&2
-    echo "Usage: akiflow:delete-event <id>" >&2
+    echo "Usage: akiflow delete-event <id>" >&2
     return 1
   fi
   local id="$1"
@@ -1182,7 +1182,7 @@ akiflow:delete-event() {
 ```bash
 akiflow:list-slots() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-slots [--format json] [--limit N]"
+    echo "Usage: akiflow list-slots [--format json] [--limit N]"
     echo "List all time slots."
     return 0
   fi
@@ -1204,7 +1204,7 @@ akiflow:list-slots() {
 ```bash
 akiflow:list-slots-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:list-slots-today [YYYY-MM-DD] [--format json] [--limit N]"
+    echo "Usage: akiflow list-slots-today [YYYY-MM-DD] [--format json] [--limit N]"
     echo "List time slots for a specific date (default: today)."
     return 0
   fi
@@ -1236,7 +1236,7 @@ akiflow:list-slots-today() {
 ```bash
 akiflow:stats() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:stats [--by label|org|priority|status] [--label <name>] [--org <name>]"
+    echo "Usage: akiflow stats [--by label|org|priority|status] [--label <name>] [--org <name>]"
     echo "Show task and event counts."
     echo "  --by <dim>     Pivot counts by label, org, priority, or status"
     echo "  --label <name> Filter to a specific label"
@@ -1315,14 +1315,14 @@ akiflow:stats() {
 ```bash
 akiflow:search() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:search '<query>' [--type task|event] [--label <label>] [--limit N]"
+    echo "Usage: akiflow search '<query>' [--type task|event] [--label <label>] [--limit N]"
     echo "Hybrid keyword + semantic search across tasks and events."
     echo "Falls back to keyword-only if RAG service is unreachable."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
     echo "Error: missing search query" >&2
-    echo "Usage: akiflow:search '<query>'" >&2
+    echo "Usage: akiflow search '<query>'" >&2
     return 1
   fi
   local query="$1"; shift
@@ -1370,7 +1370,7 @@ akiflow:search() {
 ```bash
 akiflow:sync-status() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow:sync-status"
+    echo "Usage: akiflow sync-status"
     echo "Show sync token status and pending write counts."
     return 0
   fi
@@ -1389,7 +1389,7 @@ akiflow:sync-status() {
 - `listId` = primary project UUID; `tags_ids` = array of additional tag UUIDs
 - `origin_url` links a task to a URL (email thread, web page, Jira ticket, etc.)
 - Recurring events are read-only — `update-event` and `delete-event` only affect single instances. To change a recurring series, the user must edit it in Akiflow directly.
-- Use `akiflow:sync-status` to check if the daemon is running and writes are being processed
+- Use `akiflow sync-status` to check if the daemon is running and writes are being processed
 - Reads are instant (local SQLite); writes are queued and synced automatically by the daemon
 - All `datetime` values are ISO 8601 UTC (ending in `Z`). The `TZ` env var is set to the user's local timezone for display formatting.
 - `duration` is in minutes (e.g., `30` = 30 minutes).

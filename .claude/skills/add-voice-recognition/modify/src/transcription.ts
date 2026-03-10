@@ -1,8 +1,10 @@
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { WAMessage, WASocket } from '@whiskeysockets/baileys';
 
+import { OWNER_NAME } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { identifySpeaker, updateVoiceProfile } from './voice-recognition.js';
 
 interface TranscriptionConfig {
   model: string;
@@ -231,7 +233,38 @@ export async function transcribeAudioMessage(
       return { transcript: config.fallbackMessage, audioBuffer: buffer };
     }
 
-    return { transcript: transcript.trim(), audioBuffer: buffer };
+    // Identify speaker from audio buffer
+    let speakerTag = '';
+    try {
+      const result = await identifySpeaker(buffer);
+      if (result.speaker) {
+        const pct = Math.round(result.similarity * 100);
+        speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+        // Continuous learning: update profile with high-confidence samples
+        if (
+          OWNER_NAME &&
+          result.speaker === OWNER_NAME &&
+          result.similarity >= 0.65
+        ) {
+          try {
+            await updateVoiceProfile(OWNER_NAME, [result.embedding]);
+            logger.info(
+              { similarity: result.similarity },
+              'Auto-updated voice profile with new sample',
+            );
+          } catch (learnErr) {
+            logger.warn(
+              { err: learnErr },
+              'Failed to auto-update voice profile',
+            );
+          }
+        }
+      }
+    } catch (idErr) {
+      logger.warn({ err: idErr }, 'Speaker identification failed');
+    }
+
+    return { transcript: transcript.trim() + speakerTag, audioBuffer: buffer };
   } catch (err) {
     console.error('Transcription error:', err);
     return { transcript: config.fallbackMessage, audioBuffer: null };

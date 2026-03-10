@@ -27,7 +27,6 @@ import {
   writeState,
 } from './state.js';
 import {
-  mergeContainerSecrets,
   mergeDockerComposeServices,
   mergeEnvAdditions,
   mergeNpmDependencies,
@@ -262,14 +261,6 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
         composePath,
         manifest.structured.docker_compose_services,
       );
-    }
-
-    if (manifest.structured?.container_secrets) {
-      const crPath = path.join(
-        projectRoot,
-        resolvePathRemap('src/container-runner.ts', pathRemap),
-      );
-      mergeContainerSecrets(crPath, manifest.structured.container_secrets);
     }
 
     // Run npm install if dependencies were added

@@ -12,18 +12,10 @@ modifies:
   - src/db.test.ts
   - src/db.ts
   - src/formatting.test.ts
+  - src/index.ts
+  - src/ipc.ts
   - src/router.ts
   - src/types.ts
-modify_base:
-  container/agent-runner/src/ipc-mcp-stdio.ts: _accumulated
-  rag-system/src/ingestion.ts: _accumulated
-  src/channels/whatsapp.test.ts: _accumulated
-  src/channels/whatsapp.ts: _accumulated
-  src/db.test.ts: _accumulated
-  src/db.ts: _accumulated
-  src/formatting.test.ts: _accumulated
-  src/router.ts: _accumulated
-  src/types.ts: _accumulated
 conflicts: []
 depends:
   - whatsapp-search
