@@ -88,8 +88,6 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: sync group/chat names from the platform.
-  syncGroups?(force: boolean): Promise<void>;
   // Optional: reaction support
   sendReaction?(
     chatJid: string,
@@ -102,6 +100,8 @@ export interface Channel {
     emoji: string,
   ): Promise<void>;
   reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
+  // Optional: sync group/chat names from the platform.
+  syncGroups?(force: boolean): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

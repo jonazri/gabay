@@ -1,14 +1,15 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'node:url';
 
 import {
   ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -23,6 +24,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -31,6 +33,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -61,21 +64,6 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import {
-  runChannelsReadyHooks,
-  runShutdownHooks,
-  runStartupHooks,
-  shouldProcessMessages,
-  runGuardLiftedHooks,
-} from './lifecycle.js';
-import { CursorManager } from './cursor-manager.js';
-import {
-  emitAgentStarting,
-  emitAgentOutput,
-  emitAgentSuccess,
-  emitAgentError,
-  emitMessagePiped,
-} from './message-events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -83,7 +71,7 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-const agentCursors = new CursorManager();
+let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -93,10 +81,10 @@ function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
-    agentCursors.loadAll(agentTs ? JSON.parse(agentTs) : {});
+    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    agentCursors.loadAll({});
+    lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -108,7 +96,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(agentCursors.getAll()));
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -174,8 +162,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  if (!shouldProcessMessages()) return true;
-
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = agentCursors.get(chatJid);
@@ -228,13 +214,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -253,12 +237,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
-      await emitAgentSuccess(chatJid);
       queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
-      await emitAgentError(chatJid, result.error || null);
       hadError = true;
     }
   });
@@ -379,20 +361,7 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
-  let wasGuarded = !shouldProcessMessages();
-
   while (true) {
-    // Lifecycle guard: skip processing when guards are active (e.g. Shabbat mode)
-    if (!shouldProcessMessages()) {
-      wasGuarded = true;
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-      continue;
-    }
-    if (wasGuarded) {
-      await runGuardLiftedHooks();
-      wasGuarded = false;
-    }
-
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
@@ -458,7 +427,6 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
-            await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -515,17 +483,22 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
-  await runStartupHooks();
+
+  // Start credential proxy (containers route API calls through this)
+  const proxyServer = await startCredentialProxy(
+    CREDENTIAL_PROXY_PORT,
+    PROXY_BIND_HOST,
+  );
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    proxyServer.close();
     await queue.shutdown(10000);
     stopGoogleTokenScheduler();
     stopGoogleAssistantSocket();
     shutdownGoogleAssistant();
     for (const ch of channels) await ch.disconnect();
-    await runShutdownHooks();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -578,7 +551,6 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
-  await runChannelsReadyHooks(channels);
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
@@ -622,7 +594,14 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startGoogleTokenScheduler((msg) => notifyMainGroup(`[system] ${msg}`));
+  startGoogleTokenScheduler((msg) => {
+    const mainJid = Object.entries(registeredGroups).find(
+      ([_, g]) => g.isMain === true,
+    )?.[0];
+    if (!mainJid) return;
+    const ch = findChannel(channels, mainJid);
+    ch?.sendMessage(mainJid, `[system] ${msg}`);
+  });
   startGoogleAssistantSocket();
   initGoogleAssistantDaemon().catch(() => {}); // fire-and-forget, errors already logged
   startMessageLoop().catch((err) => {
@@ -632,9 +611,10 @@ async function main(): Promise<void> {
 }
 
 // Guard: only run when executed directly, not when imported by tests
-const thisFile = fileURLToPath(import.meta.url);
-const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
-const isDirectRun = entryFile != null && thisFile === entryFile;
+const isDirectRun =
+  process.argv[1] &&
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

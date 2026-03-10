@@ -17,13 +17,8 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
-import {
-  getLastGroupSync,
-  getLatestMessage,
-  setLastGroupSync,
-  storeReaction,
-  updateChatName,
-} from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import { getLatestMessage, storeReaction } from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -388,6 +383,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to update typing status');
     }
+  }
+
+  async syncGroups(force: boolean): Promise<void> {
+    return this.syncGroupMetadata(force);
   }
 
   /**

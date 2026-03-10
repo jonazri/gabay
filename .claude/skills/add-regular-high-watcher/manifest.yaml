@@ -5,8 +5,6 @@ core_version: 0.1.0
 adds: []
 modifies:
   - src/channels/whatsapp.ts
-modify_base:
-  src/channels/whatsapp.ts: whatsapp
 conflicts: []
 depends:
   - whatsapp

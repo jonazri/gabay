@@ -1,0 +1,8 @@
+# Skill overlay files must match upstream formatting exactly.
+# Prettier reformatting breaks three-way merge in the skill replay engine.
+.claude/skills/**/modify/**
+
+# Upstream files must match upstream/main formatting exactly.
+# The patch-queue model requires src/ and container/ to be upstream-identical in git.
+container/
+src/

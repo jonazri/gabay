@@ -6,8 +6,6 @@ adds:
   - container/skills/perplexity-research/SKILL.md
 modifies:
   - src/container-runner.ts
-modify_base:
-  src/container-runner.ts: _accumulated
 structured:
   env_additions:
     - PERPLEXITY_API_KEY

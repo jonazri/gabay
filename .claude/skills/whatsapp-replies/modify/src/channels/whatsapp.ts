@@ -19,16 +19,8 @@ import {
   OWNER_NAME,
   STORE_DIR,
 } from '../config.js';
-import {
-  getLastGroupSync,
-  getLatestMessage,
-  setLastGroupSync,
-  storeReaction,
-  updateChatName,
-} from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 import {
   Channel,
   OnInboundMessage,
@@ -36,6 +28,7 @@ import {
   QuotedMessageKey,
   RegisteredGroup,
 } from '../types.js';
+import { identifySpeaker, updateVoiceProfile } from '../voice-recognition.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
 /**
@@ -250,20 +243,10 @@ export class WhatsAppChannel implements Channel {
               '';
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-            // but allow voice messages through for transcription
-            if (!content && !isVoiceMessage(msg)) continue;
+            if (!content) continue;
 
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
-
-            const fromMe = msg.key.fromMe || false;
-            // Detect bot messages: with own number, fromMe is reliable
-            // since only the bot sends from that number.
-            // With shared number, bot messages carry the assistant name prefix
-            // (even in DMs/self-chat) so we check for that.
-            const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
-              ? fromMe
-              : content.startsWith(`${ASSISTANT_NAME}:`);
 
             // Extract reply/quote context if present
             const contextInfo =
@@ -280,93 +263,21 @@ export class WhatsAppChannel implements Channel {
                 | undefined,
             );
 
-            // Transcribe voice messages and identify speaker
-            let finalContent = content;
-            if (isVoiceMessage(msg)) {
-              try {
-                const { transcript, audioBuffer } =
-                  await transcribeAudioMessage(msg, this.sock);
-
-                // Save raw audio for enrollment/debugging (opt-in via VOICE_SAVE_AUDIO=true)
-                if (process.env.VOICE_SAVE_AUDIO === 'true' && audioBuffer) {
-                  try {
-                    await fsPromises.mkdir(VOICE_AUDIO_DIR, {
-                      recursive: true,
-                    });
-                    const suffix = Math.random().toString(36).slice(2, 8);
-                    const audioPath = path.join(
-                      VOICE_AUDIO_DIR,
-                      `${Date.now()}-${suffix}.ogg`,
-                    );
-                    await fsPromises.writeFile(audioPath, audioBuffer);
-                    logger.debug({ audioPath }, 'Saved voice audio');
-                  } catch (saveErr) {
-                    logger.warn({ err: saveErr }, 'Failed to save voice audio');
-                  }
-                }
-
-                // Identify speaker
-                let speakerTag = '';
-                if (audioBuffer) {
-                  try {
-                    const result = await identifySpeaker(audioBuffer);
-                    if (result.speaker) {
-                      const pct = Math.round(result.similarity * 100);
-                      speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
-
-                      // Continuous learning: update profile with high-confidence samples
-                      if (
-                        OWNER_NAME &&
-                        result.speaker === OWNER_NAME &&
-                        result.similarity >= 0.65
-                      ) {
-                        try {
-                          await updateVoiceProfile(OWNER_NAME, [
-                            result.embedding,
-                          ]);
-                          logger.info(
-                            { similarity: result.similarity },
-                            'Auto-updated voice profile with new sample',
-                          );
-                        } catch (learnErr) {
-                          logger.warn(
-                            { err: learnErr },
-                            'Failed to auto-update voice profile',
-                          );
-                        }
-                      }
-                    } else {
-                      speakerTag = ' [Unknown speaker]';
-                    }
-                  } catch (idErr) {
-                    logger.warn(
-                      { err: idErr },
-                      'Speaker identification failed',
-                    );
-                  }
-                }
-
-                if (transcript) {
-                  finalContent = `[Voice: ${transcript}]${speakerTag}`;
-                  logger.info(
-                    { chatJid, length: transcript.length, speakerTag },
-                    'Transcribed voice message',
-                  );
-                } else {
-                  finalContent = '[Voice Message - transcription unavailable]';
-                }
-              } catch (err) {
-                logger.error({ err }, 'Voice transcription error');
-                finalContent = '[Voice Message - transcription failed]';
-              }
-            }
+            const fromMe = msg.key.fromMe || false;
+            // Detect bot messages: with own number, fromMe is reliable
+            // since only the bot sends from that number.
+            // With shared number, bot messages carry the assistant name prefix
+            // (even in DMs/self-chat) so we check for that.
+            const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
+              ? fromMe
+              : content.startsWith(`${ASSISTANT_NAME}:`);
 
             this.opts.onMessage(chatJid, {
               id: msg.key.id || '',
               chat_jid: chatJid,
               sender,
               sender_name: senderName,
-              content: finalContent,
+              content,
               timestamp,
               is_from_me: fromMe,
               is_bot_message: isBotMessage,
@@ -380,46 +291,6 @@ export class WhatsAppChannel implements Channel {
             { err, remoteJid: msg.key?.remoteJid },
             'Error processing incoming message',
           );
-        }
-      }
-    });
-
-    // Listen for message reactions
-    this.sock.ev.on('messages.reaction', async (reactions) => {
-      for (const { key, reaction } of reactions) {
-        try {
-          const messageId = key.id;
-          if (!messageId) continue;
-          const rawChatJid = key.remoteJid;
-          if (!rawChatJid || rawChatJid === 'status@broadcast') continue;
-          const chatJid = await this.translateJid(rawChatJid);
-          const groups = this.opts.registeredGroups();
-          if (!groups[chatJid]) continue;
-          const reactorJid =
-            reaction.key?.participant || reaction.key?.remoteJid || '';
-          const emoji = reaction.text || '';
-          const timestamp = reaction.senderTimestampMs
-            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
-            : new Date().toISOString();
-          storeReaction({
-            message_id: messageId,
-            message_chat_jid: chatJid,
-            reactor_jid: reactorJid,
-            reactor_name: reactorJid.split('@')[0],
-            emoji,
-            timestamp,
-          });
-          logger.info(
-            {
-              chatJid,
-              messageId: messageId.slice(0, 10) + '...',
-              reactor: reactorJid.split('@')[0],
-              emoji: emoji || '(removed)',
-            },
-            emoji ? 'Reaction added' : 'Reaction removed',
-          );
-        } catch (err) {
-          logger.error({ err }, 'Failed to process reaction');
         }
       }
     });
@@ -477,51 +348,6 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  async sendReaction(
-    chatJid: string,
-    messageKey: {
-      id: string;
-      remoteJid: string;
-      fromMe?: boolean;
-      participant?: string;
-    },
-    emoji: string,
-  ): Promise<void> {
-    if (!this.connected) {
-      logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
-      throw new Error('Not connected to WhatsApp');
-    }
-    try {
-      await this.sock.sendMessage(chatJid, {
-        react: { text: emoji, key: messageKey },
-      });
-      logger.info(
-        {
-          chatJid,
-          messageId: messageKey.id?.slice(0, 10) + '...',
-          emoji: emoji || '(removed)',
-        },
-        emoji ? 'Reaction sent' : 'Reaction removed',
-      );
-    } catch (err) {
-      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
-      throw err;
-    }
-  }
-
-  async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
-    const latest = getLatestMessage(chatJid);
-    if (!latest) {
-      throw new Error(`No messages found for chat ${chatJid}`);
-    }
-    const messageKey = {
-      id: latest.id,
-      remoteJid: chatJid,
-      fromMe: latest.fromMe,
-    };
-    await this.sendReaction(chatJid, messageKey, emoji);
-  }
-
   isConnected(): boolean {
     return this.connected;
   }
@@ -543,6 +369,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to update typing status');
     }
+  }
+
+  async syncGroups(force: boolean): Promise<void> {
+    return this.syncGroupMetadata(force);
   }
 
   /**

@@ -8,9 +8,6 @@ modifies:
   - src/db.ts
   - src/index.ts
   - src/ipc.ts
-modify_base:
-  src/index.ts: lifecycle-hooks
-  src/ipc.ts: reactions
 conflicts: []
 depends:
   - ipc-handler-registry

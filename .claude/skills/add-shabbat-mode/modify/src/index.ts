@@ -1,14 +1,15 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'node:url';
 
 import {
   ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -23,6 +24,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -31,6 +33,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -49,30 +52,16 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import {
   initShabbatSchedule,
   isShabbatOrYomTov,
   startCandleLightingNotifier,
   stopCandleLightingNotifier,
 } from './shabbat.js';
+import { onGuardLifted } from './lifecycle.js';
+import { startSchedulerLoop } from './task-scheduler.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import {
-  runChannelsReadyHooks,
-  runShutdownHooks,
-  runStartupHooks,
-  shouldProcessMessages,
-  runGuardLiftedHooks,
-} from './lifecycle.js';
-import { CursorManager } from './cursor-manager.js';
-import {
-  emitAgentStarting,
-  emitAgentOutput,
-  emitAgentSuccess,
-  emitAgentError,
-  emitMessagePiped,
-} from './message-events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -80,7 +69,7 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-const agentCursors = new CursorManager();
+let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -90,10 +79,10 @@ function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
-    agentCursors.loadAll(agentTs ? JSON.parse(agentTs) : {});
+    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    agentCursors.loadAll({});
+    lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -105,7 +94,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(agentCursors.getAll()));
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -130,6 +119,46 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+/**
+ * Send a post-Shabbat summary of pending messages across all groups.
+ * Registered as a guard-lifted hook via the lifecycle system.
+ */
+async function sendPostShabbatSummary(): Promise<void> {
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.isMain === true,
+  )?.[0];
+  if (!userJid) return;
+
+  const channel = findChannel(channels, userJid);
+  if (!channel) return;
+
+  const summaryLines: string[] = [];
+  const pendingJids: string[] = [];
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    const sinceTimestamp = agentCursors.get(chatJid);
+    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    if (pending.length > 0) {
+      summaryLines.push(`• ${group.name}: ${pending.length} messages`);
+      pendingJids.push(chatJid);
+    }
+  }
+
+  let text = 'Shavua Tov!';
+  if (summaryLines.length > 0) {
+    text += `\n\nHere's what happened over Shabbat:\n${summaryLines.join('\n')}\n\nCatching up now.`;
+  }
+
+  await channel.sendMessage(userJid, text);
+  logger.info(
+    { groupsWithActivity: summaryLines.length },
+    'Post-Shabbat summary sent',
+  );
+
+  for (const chatJid of pendingJids) {
+    queue.enqueueMessageCheck(chatJid);
+  }
 }
 
 /**
@@ -168,16 +197,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const channel = findChannel(channels, chatJid);
   if (!channel) {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
-    return true;
-  }
-
-  if (!shouldProcessMessages()) return true;
-
-  if (isShabbatOrYomTov()) {
-    logger.debug(
-      { group: group.name },
-      'Shabbat/Yom Tov active, skipping message processing',
-    );
     return true;
   }
 
@@ -233,13 +252,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -258,12 +275,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
-      await emitAgentSuccess(chatJid);
       queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
-      await emitAgentError(chatJid, result.error || null);
       hadError = true;
     }
   });
@@ -375,41 +390,6 @@ async function runAgent(
   }
 }
 
-async function sendPostShabbatSummary(): Promise<string[]> {
-  const pendingJids: string[] = [];
-
-  const userJid = Object.entries(registeredGroups).find(
-    ([_, g]) => g.isMain === true,
-  )?.[0];
-  if (!userJid) return pendingJids;
-
-  const channel = findChannel(channels, userJid);
-  if (!channel) return pendingJids;
-
-  const summaryLines: string[] = [];
-  for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = agentCursors.get(chatJid);
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-    if (pending.length > 0) {
-      summaryLines.push(`• ${group.name}: ${pending.length} messages`);
-      pendingJids.push(chatJid);
-    }
-  }
-
-  let text = 'Shavua Tov!';
-  if (summaryLines.length > 0) {
-    text += `\n\nHere's what happened over Shabbat:\n${summaryLines.join('\n')}\n\nCatching up now.`;
-  }
-
-  await channel.sendMessage(userJid, text);
-  logger.info(
-    { groupsWithActivity: summaryLines.length },
-    'Post-Shabbat summary sent',
-  );
-
-  return pendingJids;
-}
-
 async function startMessageLoop(): Promise<void> {
   if (messageLoopRunning) {
     logger.debug('Message loop already running, skipping duplicate start');
@@ -419,39 +399,8 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
-  let wasGuarded = !shouldProcessMessages();
-  let wasShabbat = isShabbatOrYomTov();
-
   while (true) {
-    // Lifecycle guard: skip processing when guards are active (e.g. Shabbat mode)
-    if (!shouldProcessMessages()) {
-      wasGuarded = true;
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-      continue;
-    }
-    if (wasGuarded) {
-      await runGuardLiftedHooks();
-      wasGuarded = false;
-    }
-
     try {
-      const currentlyShabbat = isShabbatOrYomTov();
-
-      // Post-Shabbat catch-up: send summary and re-queue pending messages
-      if (wasShabbat && !currentlyShabbat) {
-        const pendingJids = await sendPostShabbatSummary();
-        for (const chatJid of pendingJids) {
-          queue.enqueueMessageCheck(chatJid);
-        }
-      }
-      wasShabbat = currentlyShabbat;
-
-      if (currentlyShabbat) {
-        logger.debug('Shabbat/Yom Tov active, skipping message processing');
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-        continue;
-      }
-
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
@@ -516,7 +465,6 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
-            await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -574,15 +522,19 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
   initShabbatSchedule();
-  await runStartupHooks();
+
+  // Start credential proxy (containers route API calls through this)
+  const proxyServer = await startCredentialProxy(
+    CREDENTIAL_PROXY_PORT,
+    PROXY_BIND_HOST,
+  );
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
-    await runShutdownHooks();
-    stopCandleLightingNotifier();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -635,7 +587,6 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
-  await runChannelsReadyHooks(channels);
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
@@ -692,6 +643,9 @@ async function main(): Promise<void> {
     logger.warn('No main group registered — candle lighting notifier disabled');
   }
 
+  // Register post-Shabbat summary hook (runs when guard lifts after Shabbat/Yom Tov)
+  onGuardLifted(sendPostShabbatSummary);
+
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
@@ -700,9 +654,10 @@ async function main(): Promise<void> {
 }
 
 // Guard: only run when executed directly, not when imported by tests
-const thisFile = fileURLToPath(import.meta.url);
-const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
-const isDirectRun = entryFile != null && thisFile === entryFile;
+const isDirectRun =
+  process.argv[1] &&
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

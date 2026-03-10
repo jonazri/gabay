@@ -4,27 +4,28 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
-import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { AUTH_ERROR_PATTERN } from './oauth.js';
+import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -40,7 +41,6 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -77,7 +77,7 @@ function buildVolumeMounts(
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Secrets are passed via stdin instead (see readSecrets()).
+    // Credentials are injected by the credential proxy, never exposed to containers.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -157,58 +157,11 @@ function buildVolumeMounts(
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
-
-  // Sync plugins from host ~/.claude/plugins/ into each group's .claude/plugins/
-  // Rewrites installPath values so they resolve inside the container
-  const homeDir = os.homedir();
-  const hostPluginsConfig = path.join(
-    homeDir,
-    '.claude',
-    'plugins',
-    'installed_plugins.json',
-  );
-  if (fs.existsSync(hostPluginsConfig)) {
-    try {
-      const pluginsConfig = JSON.parse(
-        fs.readFileSync(hostPluginsConfig, 'utf-8'),
-      );
-      const containerHome = '/home/node';
-      for (const entries of Object.values(pluginsConfig.plugins || {})) {
-        for (const entry of entries as Array<{ installPath?: string }>) {
-          if (typeof entry.installPath === 'string') {
-            entry.installPath = entry.installPath.replace(
-              homeDir,
-              containerHome,
-            );
-          }
-        }
-      }
-      const groupPluginsDir = path.join(groupSessionsDir, 'plugins');
-      fs.mkdirSync(groupPluginsDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(groupPluginsDir, 'installed_plugins.json'),
-        JSON.stringify(pluginsConfig, null, 2) + '\n',
-      );
-    } catch (err) {
-      logger.warn({ error: err }, 'Failed to sync plugins config');
-    }
-  }
-
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
-
-  // Mount host plugins cache (read-only) so the SDK can load plugin skills
-  const hostPluginsCache = path.join(homeDir, '.claude', 'plugins', 'cache');
-  if (fs.existsSync(hostPluginsCache)) {
-    mounts.push({
-      hostPath: hostPluginsCache,
-      containerPath: '/home/node/.claude/plugins/cache',
-      readonly: true,
-    });
-  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -216,19 +169,9 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'responses'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
-    readonly: false,
-  });
-
-  // Shared sockets directory (for direct CLI-to-host communication)
-  const socketsDir = path.join(DATA_DIR, 'sockets');
-  fs.mkdirSync(socketsDir, { recursive: true });
-  mounts.push({
-    hostPath: socketsDir,
-    containerPath: '/workspace/sockets',
     readonly: false,
   });
 
@@ -269,19 +212,6 @@ function buildVolumeMounts(
   return mounts;
 }
 
-/**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
- */
-function readSecrets(): Record<string, string> {
-  return readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
-    'ANTHROPIC_AUTH_TOKEN',
-  ]);
-}
-
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -290,6 +220,31 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Route API traffic through the credential proxy (containers never see real secrets)
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  // Mirror the host's auth method with a placeholder value.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode:   SDK exchanges placeholder token for temp API key,
+  //               proxy injects real OAuth token on that exchange request.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else {
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Runtime-specific args for host gateway resolution
+  args.push(...hostGatewayArgs());
+
+  // Pass Perplexity API key to containers for research tool
+  if (process.env.PERPLEXITY_API_KEY) {
+    args.push('-e', 'PERPLEXITY_API_KEY=' + process.env.PERPLEXITY_API_KEY);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -300,9 +255,6 @@ function buildContainerArgs(
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
-
-  // Allow containers to reach host services (e.g. RAG API)
-  args.push('--add-host', 'host.docker.internal:host-gateway');
 
   for (const mount of mounts) {
     if (mount.readonly) {
@@ -359,33 +311,7 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  // Prune old container logs — keep only the 20 most recent
-  try {
-    const logFiles = fs
-      .readdirSync(logsDir)
-      .filter((f) => f.startsWith('container-') && f.endsWith('.log'))
-      .sort();
-    const MAX_CONTAINER_LOGS = 20;
-    if (logFiles.length > MAX_CONTAINER_LOGS) {
-      for (const old of logFiles.slice(
-        0,
-        logFiles.length - MAX_CONTAINER_LOGS,
-      )) {
-        fs.unlinkSync(path.join(logsDir, old));
-      }
-    }
-  } catch {
-    // Non-fatal — log rotation failure shouldn't block container runs
-  }
-
   return new Promise((resolve) => {
-    let resolved = false;
-    const safeResolve = (value: ContainerOutput) => {
-      if (resolved) return;
-      resolved = true;
-      resolve(value);
-    };
-
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -397,12 +323,8 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -448,33 +370,6 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
-
-            // Streaming failsafe: detect auth errors immediately
-            // In streaming mode the container never exits on auth errors —
-            // the SDK retries internally. Catch it here and abort early.
-            // Check parsed.error (actual SDK errors), NOT parsed.result
-            // (agent conversation text which may naturally discuss auth topics).
-            if (parsed.error && AUTH_ERROR_PATTERN.test(parsed.error)) {
-              logger.warn(
-                { group: group.name, containerName },
-                'Auth error detected in streaming output, aborting container',
-              );
-              // Use `docker stop` to properly stop the container.
-              // container.kill('SIGTERM') only kills the docker CLI client,
-              // leaving the container running as a zombie.
-              exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-                if (err) container.kill('SIGKILL');
-              });
-              clearTimeout(timeout);
-              safeResolve({
-                status: 'error',
-                result: null,
-                error: parsed.error,
-                newSessionId,
-              });
-              return;
-            }
-
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
@@ -571,7 +466,7 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
-            safeResolve({
+            resolve({
               status: 'success',
               result: null,
               newSessionId,
@@ -585,7 +480,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        safeResolve({
+        resolve({
           status: 'error',
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
@@ -664,7 +559,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        safeResolve({
+        resolve({
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
@@ -679,7 +574,7 @@ export async function runContainerAgent(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
           );
-          safeResolve({
+          resolve({
             status: 'success',
             result: null,
             newSessionId,
@@ -717,7 +612,7 @@ export async function runContainerAgent(
           'Container completed',
         );
 
-        safeResolve(output);
+        resolve(output);
       } catch (err) {
         logger.error(
           {
@@ -729,7 +624,7 @@ export async function runContainerAgent(
           'Failed to parse container output',
         );
 
-        safeResolve({
+        resolve({
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
@@ -743,7 +638,7 @@ export async function runContainerAgent(
         { group: group.name, containerName, error: err },
         'Container spawn error',
       );
-      safeResolve({
+      resolve({
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,

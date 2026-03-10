@@ -9,14 +9,10 @@ adds:
 modifies:
   - src/index.ts
   - src/task-scheduler.ts
-  - src/task-scheduler.test.ts
   - src/ipc.ts
 structured:
   npm_dependencies:
     "@hebcal/core": "^6.0.8"
-modify_base:
-  src/index.ts: lifecycle-hooks
-  src/task-scheduler.ts: _accumulated
 conflicts: []
 depends:
   - lifecycle-hooks
