@@ -58,6 +58,7 @@ import {
   startCandleLightingNotifier,
   stopCandleLightingNotifier,
 } from './shabbat.js';
+import { onGuardLifted } from './lifecycle.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -641,6 +642,9 @@ async function main(): Promise<void> {
   } else {
     logger.warn('No main group registered — candle lighting notifier disabled');
   }
+
+  // Register post-Shabbat summary hook (runs when guard lifts after Shabbat/Yom Tov)
+  onGuardLifted(sendPostShabbatSummary);
 
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

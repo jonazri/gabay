@@ -46,12 +46,12 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Build TypeScript
+RUN npm run build
+
 # Install akiflow CLI dispatcher
 COPY skills/akiflow/akiflow /usr/local/bin/akiflow
 RUN chmod +x /usr/local/bin/akiflow
-
-# Build TypeScript
-RUN npm run build
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

@@ -15,6 +15,12 @@ export interface IpcDeps {
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
+  /** Send a message with reply threading. Falls back to sendMessage if not provided. */
+  sendMessageWithQuote?: (
+    jid: string,
+    text: string,
+    quotedMessageId: string,
+  ) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
     groupFolder: string,
@@ -80,9 +86,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  if (data.quotedMessageId && deps.sendMessageWithQuote) {
+                    await deps.sendMessageWithQuote(
+                      data.chatJid,
+                      data.text,
+                      data.quotedMessageId,
+                    );
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text);
+                  }
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      quotedMessageId: data.quotedMessageId,
+                    },
                     'IPC message sent',
                   );
                 } else {

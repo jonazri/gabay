@@ -116,15 +116,6 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
-function unregisterGroup(jid: string): boolean {
-  const deleted = deleteRegisteredGroup(jid);
-  if (deleted) {
-    delete registeredGroups[jid];
-    logger.info({ jid }, 'Group unregistered');
-  }
-  return deleted;
-}
-
 /**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
@@ -473,6 +464,15 @@ function recoverPendingMessages(): void {
       queue.enqueueMessageCheck(chatJid);
     }
   }
+}
+
+function unregisterGroup(jid: string): boolean {
+  const deleted = deleteRegisteredGroup(jid);
+  if (deleted) {
+    delete registeredGroups[jid];
+    logger.info({ jid }, 'Group unregistered');
+  }
+  return deleted;
 }
 
 function ensureContainerSystemRunning(): void {
