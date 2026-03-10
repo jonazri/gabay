@@ -7,8 +7,6 @@ adds:
   - scripts/voice-recognition-service.py
   - scripts/enroll-voice.ts
 modifies:
-  - src/channels/whatsapp.ts
-  - src/channels/whatsapp.test.ts
   - src/config.ts
   - src/transcription.ts
 conflicts: []

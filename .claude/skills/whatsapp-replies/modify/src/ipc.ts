@@ -8,25 +8,10 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup } from './types.js';
-import { getIpcHandler } from './ipc-handlers.js';
-import {
-  writeIpcNotification,
-  writeIpcErrorResponse,
-} from './ipc-self-heal.js';
 
 export interface IpcDeps {
-  sendMessage: (
-    jid: string,
-    text: string,
-    quotedMessageId?: string,
-  ) => Promise<void>;
-  sendReaction?: (
-    jid: string,
-    emoji: string,
-    messageId?: string,
-  ) => Promise<void>;
+  sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -37,13 +22,9 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
-  unregisterGroup?: (jid: string) => boolean;
-  statusHeartbeat?: () => void;
-  recoverPendingMessages?: () => void;
 }
 
 let ipcWatcherRunning = false;
-const RECOVERY_INTERVAL_MS = 60_000;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -54,15 +35,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
-  let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
-    if (isShabbatOrYomTov()) {
-      logger.debug('Shabbat/Yom Tov active, skipping IPC processing');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
-      return;
-    }
-
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -106,11 +80,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(
-                    data.chatJid,
-                    data.text,
-                    data.quotedMessageId,
-                  );
+                  await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -119,44 +89,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
-                  );
-                }
-              } else if (
-                data.type === 'reaction' &&
-                data.chatJid &&
-                data.emoji &&
-                deps.sendReaction
-              ) {
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  try {
-                    await deps.sendReaction(
-                      data.chatJid,
-                      data.emoji,
-                      data.messageId,
-                    );
-                    logger.info(
-                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
-                      'IPC reaction sent',
-                    );
-                  } catch (err) {
-                    logger.error(
-                      {
-                        chatJid: data.chatJid,
-                        emoji: data.emoji,
-                        sourceGroup,
-                        err,
-                      },
-                      'IPC reaction failed',
-                    );
-                  }
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC reaction attempt blocked',
                   );
                 }
               }
@@ -214,16 +146,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
-    // Status emoji heartbeat — detect dead containers with stale emoji state
-    deps.statusHeartbeat?.();
-
-    // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
-    const now = Date.now();
-    if (now - lastRecoveryTime >= RECOVERY_INTERVAL_MS) {
-      lastRecoveryTime = now;
-      deps.recoverPendingMessages?.();
-    }
-
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 
@@ -242,7 +164,6 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
-    requestId?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -528,48 +449,7 @@ export async function processTaskIpc(
       }
       break;
 
-    default: {
-      const handler = getIpcHandler(data.type);
-      if (handler) {
-        try {
-          await handler(data, deps, { sourceGroup, isMain });
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          logger.error(
-            { type: data.type, err, sourceGroup },
-            'IPC handler threw an exception',
-          );
-          writeIpcErrorResponse(
-            sourceGroup,
-            data.requestId,
-            'handler_error',
-            data.type,
-            errorMessage,
-          );
-          writeIpcNotification(
-            sourceGroup,
-            'handler_error',
-            data.type,
-            errorMessage,
-          );
-        }
-      } else {
-        const errorMessage = `No handler registered for IPC type "${data.type}"`;
-        logger.warn({ type: data.type }, 'Unknown IPC task type');
-        writeIpcErrorResponse(
-          sourceGroup,
-          data.requestId,
-          'unknown_ipc_type',
-          data.type,
-          errorMessage,
-        );
-        writeIpcNotification(
-          sourceGroup,
-          'unknown_ipc_type',
-          data.type,
-          errorMessage,
-        );
-      }
-    }
+    default:
+      logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
 }

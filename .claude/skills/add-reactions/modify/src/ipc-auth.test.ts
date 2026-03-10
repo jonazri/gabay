@@ -63,7 +63,7 @@ beforeEach(() => {
       delete groups[jid];
       return existed;
     },
-    syncGroupMetadata: async () => {},
+    syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
   };

@@ -9,7 +9,6 @@ adds:
 modifies:
   - src/index.ts
   - src/task-scheduler.ts
-  - src/task-scheduler.test.ts
   - src/ipc.ts
 structured:
   npm_dependencies:
