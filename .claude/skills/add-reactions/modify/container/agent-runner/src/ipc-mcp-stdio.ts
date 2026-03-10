@@ -63,8 +63,6 @@ server.tool(
 );
 
 server.tool(
-
-server.tool(
   'react_to_message',
   'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
   {
@@ -99,6 +97,8 @@ server.tool(
     };
   },
 );
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
