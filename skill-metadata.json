@@ -1,0 +1,9 @@
+{
+  "name": "ipc-handler-registry",
+  "description": "IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["ipc", "infrastructure", "self-heal"]
+}
