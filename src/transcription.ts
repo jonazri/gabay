@@ -1,7 +1,10 @@
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { WAMessage, WASocket } from '@whiskeysockets/baileys';
 
+import { OWNER_NAME } from './config.js';
 import { readEnvFile } from './env.js';
+import { logger } from './logger.js';
+import { identifySpeaker, updateVoiceProfile } from './voice-recognition.js';
 
 interface TranscriptionConfig {
   model: string;
@@ -113,7 +116,7 @@ async function transcribeWithElevenLabs(
   const apiKey = env.ELEVENLABS_API_KEY;
 
   if (!apiKey) {
-    console.warn('ELEVENLABS_API_KEY not set in .env');
+    logger.warn('ELEVENLABS_API_KEY not set in .env');
     return null;
   }
 
@@ -182,25 +185,30 @@ async function transcribeWithElevenLabs(
 
     const metadataString = formatMetadata(metadata);
 
-    console.log(
+    logger.info(
       `Transcribed voice message: ${result.text.length} chars${metadataString}`,
     );
 
     return result.text.trim() + metadataString;
   } catch (err) {
-    console.error('ElevenLabs transcription failed:', err);
+    logger.error({ err }, 'ElevenLabs transcription failed');
     return null;
   }
+}
+
+export interface TranscriptionResult {
+  transcript: string | null;
+  audioBuffer: Buffer | null;
 }
 
 export async function transcribeAudioMessage(
   msg: WAMessage,
   sock: WASocket,
-): Promise<string | null> {
+): Promise<TranscriptionResult> {
   const config = DEFAULT_CONFIG;
 
   if (!config.enabled) {
-    return config.fallbackMessage;
+    return { transcript: config.fallbackMessage, audioBuffer: null };
   }
 
   try {
@@ -215,22 +223,53 @@ export async function transcribeAudioMessage(
     )) as Buffer;
 
     if (!buffer || buffer.length === 0) {
-      console.error('Failed to download audio message');
-      return config.fallbackMessage;
+      logger.error('Failed to download audio message');
+      return { transcript: config.fallbackMessage, audioBuffer: null };
     }
 
-    console.log(`Downloaded audio message: ${buffer.length} bytes`);
+    logger.debug({ bytes: buffer.length }, 'Downloaded audio message');
 
     const transcript = await transcribeWithElevenLabs(buffer, config);
 
     if (!transcript) {
-      return config.fallbackMessage;
+      return { transcript: config.fallbackMessage, audioBuffer: buffer };
     }
 
-    return transcript.trim();
+    // Identify speaker from audio buffer
+    let speakerTag = '';
+    try {
+      const result = await identifySpeaker(buffer);
+      if (result.speaker) {
+        const pct = Math.round(result.similarity * 100);
+        speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+        // Continuous learning: update profile with high-confidence samples
+        if (
+          OWNER_NAME &&
+          result.speaker === OWNER_NAME &&
+          result.similarity >= 0.65
+        ) {
+          try {
+            await updateVoiceProfile(OWNER_NAME, [result.embedding]);
+            logger.info(
+              { similarity: result.similarity },
+              'Auto-updated voice profile with new sample',
+            );
+          } catch (learnErr) {
+            logger.warn(
+              { err: learnErr },
+              'Failed to auto-update voice profile',
+            );
+          }
+        }
+      }
+    } catch (idErr) {
+      logger.warn({ err: idErr }, 'Speaker identification failed');
+    }
+
+    return { transcript: transcript.trim() + speakerTag, audioBuffer: buffer };
   } catch (err) {
     console.error('Transcription error:', err);
-    return config.fallbackMessage;
+    return { transcript: config.fallbackMessage, audioBuffer: null };
   }
 }
 
