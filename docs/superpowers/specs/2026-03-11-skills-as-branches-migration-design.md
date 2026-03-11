@@ -133,7 +133,9 @@ For each of the 18 installed skills (17 after folding whatsapp-types into whatsa
 
 Store this as a structured reference (JSON or markdown) so review agents can use it.
 
-**Also:** Apply all skills to get the fully-applied src/ state. Archive this as a reference for what the final merged result should look like.
+**Also:** Apply all skills to get the fully-applied src/ state. Archive this as a reference for what the final merged result should look like. **Important:** The archive must capture untracked files (skill-added files like `src/lifecycle.ts`, `src/channels/whatsapp.ts`). Use a temporary branch (`git add -A && git commit`), not `git stash push` (which misses untracked files).
+
+**Additional metadata to capture:** Beyond manifest fields, record each skill's directory name under `.claude/skills/` (the `skill_dir` — most use `add-<name>` but `ipc-handler-registry` and `whatsapp-replies` omit the `add-` prefix), and any extra directories not in the manifest (e.g., akiflow-sync's top-level `akiflow-sync/` directory).
 
 ### Phase 2: Merge upstream/main
 
@@ -145,10 +147,10 @@ The upstream diff touches ~150+ files outside of `.claude/skills/` and `skills-e
 
 | Conflict Type | Count | Resolution |
 |--------------|-------|------------|
-| modify/delete: `.claude/skills/*/modify/`, `add/`, `tests/`, `manifest.yaml` | ~35 | Accept deletion — overlay files are being replaced by skill branches |
-| modify/delete: `skills-engine/constants.ts`, `skills-engine/init.ts` | 2 | Accept deletion — engine is being removed |
-| modify/delete: `scripts/apply-skill.ts`, `scripts/uninstall-skill.ts` | 2 | Accept deletion — replaced by git operations |
-| modify/delete: `.github/workflows/skill-drift.yml`, `skill-pr.yml` | 2 | Accept deletion — replaced by merge-forward workflow |
+| modify/delete: `.claude/skills/*/modify/`, `add/`, `tests/`, `manifest.yaml` | ~35 | Accept deletion via `git rm <file>` — overlay files are being replaced by skill branches (`git checkout --theirs` fails for modify/delete conflicts) |
+| modify/delete: `skills-engine/constants.ts`, `skills-engine/init.ts` | 2 | Accept deletion via `git rm <file>` — engine is being removed |
+| modify/delete: `scripts/apply-skill.ts`, `scripts/uninstall-skill.ts` | 2 | Accept deletion via `git rm <file>` — replaced by git operations |
+| modify/delete: `.github/workflows/skill-drift.yml`, `skill-pr.yml` | 2 | Accept deletion via `git rm <file>` — replaced by merge-forward workflow |
 | add/add: `.claude/skills/add-compact/SKILL.md`, `add-reactions/SKILL.md` | 2 | Take upstream's version (ours will be in skill branches) |
 | content: `package.json` | 1 | Merge: keep upstream's scripts, strip skill-specific deps (those move to skill branches) |
 | content: `package-lock.json` | 1 | Regenerate via `npm install` after resolving package.json |
@@ -181,7 +183,8 @@ For each of the 17 skill branches, a review agent:
 
 3. **Applies changes** to the new upstream src/:
    - For manifest-listed `add/` files: copy directly (these are new files, no conflict possible)
-   - For manifest-listed `modify/` overlays: understand the intent, apply equivalent changes to new upstream src/
+   - For manifest-listed `modify/` overlays: understand the intent, apply equivalent changes to new upstream src/. Check for `.intent.md` companion files alongside modify/ overlays (e.g., `modify/src/ipc.ts.intent.md`) — if present, use as the authoritative description of the overlay's intent
+   - Ignore `modify_base` fields in manifests — they are a patch-queue concept. In the branch model, apply only the skill's unique changes to the current branch state (which already includes parent changes via branching/merging)
    - For `package.json`: add skill-specific dependencies
    - For `.env.example`: add skill-specific env vars
    - For directories not in manifest but belonging to the skill (e.g., `akiflow-sync/` top-level dir with its own package.json — not in akiflow-sync manifest but clearly part of the skill): include them in the skill branch
@@ -249,7 +252,7 @@ Within each tier, process in `installed-skills.yaml` order to minimize unexpecte
 - shabbat-mode (branch from: lifecycle-hooks)
 - akiflow-sync (branch from: container-hardening)
 
-**Tier 3 (depends on Tier 2):**
+**Tier 3 (depends on Tier 1 — can run in parallel with Tier 2):**
 - reactions (branch from: whatsapp — modifies `src/channels/whatsapp.ts`)
 - whatsapp-replies (branch from: whatsapp, merge: whatsapp-search — modifies both `whatsapp.ts` and `rag-system/`)
 
@@ -265,15 +268,17 @@ Before composing, validate each skill branch independently:
 
 ```bash
 failures=()
-git branch --format='%(refname:short)' --list 'skill/*' | while read -r branch; do
+while read -r branch; do
   git checkout "$branch"
-  npm install && npm run build && npm test || failures+=("$branch")
-done
+  npm install && npx tsc && npm test || failures+=("$branch")
+done < <(git branch --format='%(refname:short)' --list 'skill/*')
 if [ ${#failures[@]} -gt 0 ]; then
   echo "FAILED branches: ${failures[*]}"
   exit 1
 fi
 ```
+
+**Note:** Uses process substitution (`< <(...)`) instead of a pipe so `failures+=()` runs in the current shell. Uses `npx tsc` instead of `npm run build` because the old overlay engine may still be in the build script at this stage.
 
 This catches issues in isolation before they compound during the merge sequence. Each branch gets a fresh `npm install` since skill branches modify `package.json` with different dependencies.
 
@@ -283,32 +288,33 @@ Merge all skill branches into main in dependency order:
 
 ```bash
 # Tier 1 (independent — branch from main, in installed-skills.yaml order)
-git merge skill/lifecycle-hooks
-git merge skill/whatsapp
-git merge skill/ipc-handler-registry
-git merge skill/container-hardening
-git merge skill/task-scheduler-fixes
-git merge skill/whatsapp-search
-git merge skill/perplexity-research
-git merge skill/feature-request
-git merge skill/whatsapp-summary
+for branch in skill/lifecycle-hooks skill/whatsapp skill/ipc-handler-registry \
+              skill/container-hardening skill/task-scheduler-fixes skill/whatsapp-search \
+              skill/perplexity-research skill/feature-request skill/whatsapp-summary; do
+  git merge "$branch" --no-edit
+  npm install  # ensure deps from merged skill are installed before next merge
+done
 
 # Tier 2 (children of Tier 1)
-git merge skill/group-lifecycle
-git merge skill/google-home
-git merge skill/shabbat-mode
-git merge skill/akiflow-sync
+for branch in skill/group-lifecycle skill/google-home skill/shabbat-mode skill/akiflow-sync; do
+  git merge "$branch" --no-edit
+  npm install
+done
 
-# Tier 3 (children of Tier 2)
-git merge skill/reactions
-git merge skill/whatsapp-replies
+# Tier 3 (depends on Tier 1 — can run parallel with Tier 2)
+for branch in skill/reactions skill/whatsapp-replies; do
+  git merge "$branch" --no-edit
+  npm install
+done
 
 # Tier 4-5 (voice chain)
-git merge skill/voice-transcription-elevenlabs
-git merge skill/voice-recognition
+for branch in skill/voice-transcription-elevenlabs skill/voice-recognition; do
+  git merge "$branch" --no-edit
+  npm install
+done
 ```
 
-Git handles composition. Conflicts (if any) are resolved interactively.
+Git handles composition. Run `npm install` after each merge so that skill-specific dependencies are available before subsequent merges. Conflicts (if any) are resolved interactively.
 
 **Same-file stacking:** Multiple independent skills modify the same core files (e.g., `src/task-scheduler.ts` is modified by both task-scheduler-fixes in Tier 1 and shabbat-mode in Tier 2; `src/index.ts` is modified by 6+ skills across tiers). In the patch-queue model, order determined the merge base for each overlay. In the branch model, each skill modifies files independently from its parent branch; git merge handles composition. Non-overlapping changes auto-merge regardless of order. Overlapping changes produce conflicts resolved during this phase. Compare the final composed result against the Phase 1 archive to verify behavioral equivalence.
 
@@ -326,7 +332,7 @@ Git handles composition. Conflicts (if any) are resolved interactively.
 
 **Non-installed skill overlay files:** `.claude/skills/` contains 41 directories total (including operational skills like `setup/`, `debug/`, `x-integration/` that have no overlays). Non-installed skills with overlay artifacts (`add/`, `modify/`, `manifest.yaml`) to clean up: add-discord, add-gmail, add-image-vision, add-ollama-tool, add-pdf-reader, add-slack, add-telegram, add-compact, add-voice-transcription (original, pre-elevenlabs), convert-to-apple-container, use-local-whisper, add-whatsapp-resilience, add-regular-high-watcher. Note: `add-telegram-swarm` and `add-parallel` are already SKILL.md-only (no overlay artifacts) — no cleanup needed. Remove their overlay artifacts during cleanup — they're replaced by upstream's SKILL.md-only versions or can be installed from upstream skill branches/channel forks later. Operational skill directories (SKILL.md-only, no overlays) are kept as-is.
 
-**Skill directory naming:** Some skill directories don't follow the `add-` prefix convention (e.g., `ipc-handler-registry/`, `whatsapp-replies/`). The new skill branch names (`skill/<name>`) don't need prefixes, so this is a non-issue post-migration.
+**Skill directory naming:** Some skill directories don't follow the `add-` prefix convention (e.g., `ipc-handler-registry/`, `whatsapp-replies/`). During Phase 3, agents must use the correct `skill_dir` (captured in Phase 1 metadata) to find overlay files on the backup tag. Post-migration, skill branch names (`skill/<name>`) don't need prefixes.
 
 **Enable merge-forward CI:**
 - Upstream's `.github/workflows/merge-forward-skills.yml` (arriving via the Phase 2 merge) automatically merges main into every `skill/*` branch on each push to main, runs build + test, and opens an issue if any fail. Verify this workflow is present and functional after the merge. This is critical for marketplace readiness — other Shluchim consuming our skill branches need them to stay current with main.
