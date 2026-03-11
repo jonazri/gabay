@@ -40,7 +40,7 @@ git merge whatsapp/skill/image-vision || {
 ```
 
 This merges in:
-- `src/image.ts` (image download, resize via sharp, base64 encoding)
+- `src/image.ts` (image download, resize via sharp, JPEG conversion)
 - `src/image.test.ts` (8 unit tests)
 - Image attachment handling in `src/channels/whatsapp.ts`
 - Image passing to agent in `src/index.ts` and `src/container-runner.ts`

@@ -591,6 +591,22 @@ async function main(): Promise<void> {
       };
       return channel.sendMessage(jid, text, quotedKey);
     },
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      if (messageId && channel.sendReaction) {
+        const msg = getMessageById(messageId, jid);
+        const key = {
+          id: messageId,
+          remoteJid: jid,
+          fromMe: msg?.is_from_me === true || (msg?.is_from_me as unknown) === 1,
+          participant: msg?.sender,
+        };
+        await channel.sendReaction(jid, key, emoji);
+      } else if (channel.reactToLatestMessage) {
+        await channel.reactToLatestMessage(jid, emoji);
+      }
+    },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),

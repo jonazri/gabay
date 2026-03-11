@@ -24,11 +24,11 @@ export function formatMessages(
       : '';
     const content = `${replyTag}\n  ${escapeXml(m.content)}`.trimEnd();
     if (replyTag) {
-      return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${displayTime}"${replyAttrs}>${content}\n</message>`;
+      return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}"${replyAttrs}>${content}\n</message>`;
     }
-    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${displayTime}"${replyAttrs}>${escapeXml(m.content)}</message>`;
+    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}"${replyAttrs}>${escapeXml(m.content)}</message>`;
   });
-  return `<context timezone="${timezone}" />\n<messages>\n${lines.join('\n')}\n</messages>`;
+  return `<context timezone="${escapeXml(timezone)}" />\n<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {
