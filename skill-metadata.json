@@ -1,9 +1,9 @@
 {
-  "name": "perplexity-research",
-  "description": "Web research via Perplexity Pro API (sonar, sonar-pro, sonar-deep-research)",
+  "name": "feature-request",
+  "description": "Container agent can write feature request PRDs for the host to review",
   "version": "1.0.0",
   "author": "jonazri",
   "depends": [],
-  "env": ["PERPLEXITY_API_KEY"],
-  "tags": ["research", "web", "perplexity"]
+  "env": [],
+  "tags": ["feature-request", "agent", "prd"]
 }

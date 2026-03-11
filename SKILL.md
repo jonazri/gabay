@@ -1,16 +1,16 @@
-# Perplexity Research
-Web research via Perplexity Pro API (sonar, sonar-pro, sonar-deep-research).
+# Feature Request
+Container agent can write feature request PRDs for the host to review.
 
 ## Prerequisites
 None
 
 ## Installation
-1. `git fetch origin skill/perplexity-research`
-2. `git merge origin/skill/perplexity-research`
+1. `git fetch origin skill/feature-request`
+2. `git merge origin/skill/feature-request`
 3. `npm install`
 
 ## Verification
 - `npm run build && npm test`
 
 ## Environment Variables
-- `PERPLEXITY_API_KEY` — Perplexity API key for web research
+None

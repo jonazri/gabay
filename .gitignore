@@ -44,10 +44,14 @@ agents-sdk-docs
 container/skills/*
 !container/skills/agent-browser/
 <<<<<<< HEAD
+<<<<<<< HEAD
 !container/skills/whatsapp-search/
 =======
 !container/skills/perplexity-research/
 >>>>>>> origin/skill/perplexity-research
+=======
+!container/skills/feature-request/
+>>>>>>> origin/skill/feature-request
 container/.dockerignore
 scripts/enroll-voice.ts
 scripts/generate-zmanim.ts
