@@ -20,9 +20,12 @@ Our fork has 18 installed skills using the old patch-queue model, but `whatsapp-
 
 ## Non-Goals
 
-- Migrating to upstream's channel forks (we keep whatsapp as a skill branch)
-- Adopting upstream's marketplace plugin system (we install skills via git merge)
+- Migrating to upstream's channel forks (we keep whatsapp as a skill branch — our 17 skills heavily cross-cut WhatsApp files, making a separate channel repo impractical)
 - Adding new skills as part of this migration
+
+## Future: Private Marketplace
+
+After migration, we plan to adopt Claude Code's marketplace plugin system to build a **private marketplace for Shluchim** — publishing select fork skills and accepting community contributions. This is a separate spec (not part of this migration) but informs our architecture: skill branches should be structured so they can be published to a marketplace later. See the dedicated marketplace spec when available.
 
 ## Architecture
 
