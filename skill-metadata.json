@@ -1,0 +1,9 @@
+{
+  "name": "task-scheduler-fixes",
+  "description": "Prevent duplicate task execution and improve task result routing",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["scheduler", "bugfix", "tasks"]
+}
