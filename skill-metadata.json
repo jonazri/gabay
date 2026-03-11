@@ -1,9 +1,9 @@
 {
-  "name": "reactions",
-  "description": "WhatsApp emoji reaction support with status tracking",
+  "name": "whatsapp-replies",
+  "description": "See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": ["whatsapp"],
+  "depends": ["whatsapp", "whatsapp-search"],
   "env": [],
-  "tags": ["whatsapp", "reactions", "emoji"]
+  "tags": ["whatsapp", "replies", "threading", "rag"]
 }

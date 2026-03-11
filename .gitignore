@@ -48,6 +48,7 @@ container/skills/*
 <<<<<<< HEAD
 <<<<<<< HEAD
 !container/skills/whatsapp-search/
+<<<<<<< HEAD
 =======
 !container/skills/perplexity-research/
 >>>>>>> origin/skill/perplexity-research
@@ -60,6 +61,9 @@ container/skills/*
 =======
 !container/skills/akiflow/
 >>>>>>> origin/skill/akiflow-sync
+=======
+!container/skills/whatsapp-replies/
+>>>>>>> origin/skill/whatsapp-replies
 container/.dockerignore
 scripts/enroll-voice.ts
 scripts/generate-zmanim.ts

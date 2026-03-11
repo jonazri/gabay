@@ -1,14 +1,14 @@
-# Reactions
-WhatsApp emoji reaction support with status tracking.
+# WhatsApp Replies
+See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context.
 
 ## Prerequisites
 - skill/whatsapp
+- skill/whatsapp-search
 
 ## Installation
-1. `git fetch origin skill/reactions`
-2. `git merge origin/skill/reactions`
+1. `git fetch origin skill/whatsapp-replies`
+2. `git merge origin/skill/whatsapp-replies`
 3. `npm install`
-4. Run `npx tsx scripts/migrate-reactions.ts` to add reaction columns to existing DB
 
 ## Verification
 - `npm run build && npm test`
