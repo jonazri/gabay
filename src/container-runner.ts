@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -157,11 +158,58 @@ function buildVolumeMounts(
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
+
+  // Sync plugins from host ~/.claude/plugins/ into each group's .claude/plugins/
+  // Rewrites installPath values so they resolve inside the container
+  const homeDir = os.homedir();
+  const hostPluginsConfig = path.join(
+    homeDir,
+    '.claude',
+    'plugins',
+    'installed_plugins.json',
+  );
+  if (fs.existsSync(hostPluginsConfig)) {
+    try {
+      const pluginsConfig = JSON.parse(
+        fs.readFileSync(hostPluginsConfig, 'utf-8'),
+      );
+      const containerHome = '/home/node';
+      for (const entries of Object.values(pluginsConfig.plugins || {})) {
+        for (const entry of entries as Array<{ installPath?: string }>) {
+          if (typeof entry.installPath === 'string') {
+            entry.installPath = entry.installPath.replace(
+              homeDir,
+              containerHome,
+            );
+          }
+        }
+      }
+      const groupPluginsDir = path.join(groupSessionsDir, 'plugins');
+      fs.mkdirSync(groupPluginsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(groupPluginsDir, 'installed_plugins.json'),
+        JSON.stringify(pluginsConfig, null, 2) + '\n',
+      );
+    } catch (err) {
+      logger.warn({ error: err }, 'Failed to sync plugins config');
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Mount host plugins cache (read-only) so the SDK can load plugin skills
+  const hostPluginsCache = path.join(homeDir, '.claude', 'plugins', 'cache');
+  if (fs.existsSync(hostPluginsCache)) {
+    mounts.push({
+      hostPath: hostPluginsCache,
+      containerPath: '/home/node/.claude/plugins/cache',
+      readonly: true,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -169,9 +217,19 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'responses'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
+    readonly: false,
+  });
+
+  // Shared sockets directory (for direct CLI-to-host communication)
+  const socketsDir = path.join(DATA_DIR, 'sockets');
+  fs.mkdirSync(socketsDir, { recursive: true });
+  mounts.push({
+    hostPath: socketsDir,
+    containerPath: '/workspace/sockets',
     readonly: false,
   });
 
@@ -199,6 +257,19 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Akiflow SQLite DB (shared with akiflow-sync daemon)
+  const akiflowDbPath = process.env.AKIFLOW_DB_PATH
+    ? path.resolve(process.cwd(), process.env.AKIFLOW_DB_PATH)
+    : path.join(process.cwd(), 'akiflow', 'akiflow.db');
+  const akiflowDir = path.dirname(akiflowDbPath);
+  if (fs.existsSync(akiflowDir)) {
+    mounts.push({
+      hostPath: akiflowDir,
+      containerPath: '/workspace/akiflow',
+      readonly: false,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -221,6 +292,15 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Inject Akiflow SQLite DB path for container agent
+  const akiflowDbPathForEnv = process.env.AKIFLOW_DB_PATH
+    ? path.resolve(process.cwd(), process.env.AKIFLOW_DB_PATH)
+    : path.join(process.cwd(), 'akiflow', 'akiflow.db');
+  args.push(
+    '-e',
+    `AKIFLOW_DB=/workspace/akiflow/${path.basename(akiflowDbPathForEnv)}`,
+  );
+
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',
@@ -240,6 +320,11 @@ function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Pass Perplexity API key to containers for research tool
+  if (process.env.PERPLEXITY_API_KEY) {
+    args.push('-e', 'PERPLEXITY_API_KEY=' + process.env.PERPLEXITY_API_KEY);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -306,7 +391,33 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  // Prune old container logs — keep only the 20 most recent
+  try {
+    const logFiles = fs
+      .readdirSync(logsDir)
+      .filter((f) => f.startsWith('container-') && f.endsWith('.log'))
+      .sort();
+    const MAX_CONTAINER_LOGS = 20;
+    if (logFiles.length > MAX_CONTAINER_LOGS) {
+      for (const old of logFiles.slice(
+        0,
+        logFiles.length - MAX_CONTAINER_LOGS,
+      )) {
+        fs.unlinkSync(path.join(logsDir, old));
+      }
+    }
+  } catch {
+    // Non-fatal — log rotation failure shouldn't block container runs
+  }
+
   return new Promise((resolve) => {
+    let resolved = false;
+    const safeResolve = (value: ContainerOutput) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -461,7 +572,7 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
-            resolve({
+            safeResolve({
               status: 'success',
               result: null,
               newSessionId,
@@ -475,7 +586,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
@@ -554,7 +665,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
@@ -569,7 +680,7 @@ export async function runContainerAgent(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
           );
-          resolve({
+          safeResolve({
             status: 'success',
             result: null,
             newSessionId,
@@ -607,7 +718,7 @@ export async function runContainerAgent(
           'Container completed',
         );
 
-        resolve(output);
+        safeResolve(output);
       } catch (err) {
         logger.error(
           {
@@ -619,7 +730,7 @@ export async function runContainerAgent(
           'Failed to parse container output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
@@ -633,7 +744,7 @@ export async function runContainerAgent(
         { group: group.name, containerName, error: err },
         'Container spawn error',
       );
-      resolve({
+      safeResolve({
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,

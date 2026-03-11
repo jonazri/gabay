@@ -19,6 +19,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -185,13 +186,20 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
+          // Safety: never send scheduled task results to a group chat
+          if (task.chat_jid.endsWith('@g.us')) {
+            logger.error(
+              { taskId: task.id, chatJid: task.chat_jid },
+              'Blocked scheduled task result from being sent to group chat',
+            );
+            return;
+          }
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -204,7 +212,7 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
+      // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
     }
 
@@ -229,6 +237,8 @@ async function runTask(
     error,
   });
 
+  // next_run was already advanced before enqueuing (see startSchedulerLoop).
+  // Recompute to pass through for the status logic ('once' tasks -> completed).
   const nextRun = computeNextRun(task);
   const resultSummary = error
     ? `Error: ${error}`
@@ -251,6 +261,18 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
+
+      if (isShabbatOrYomTov()) {
+        if (dueTasks.length > 0) {
+          logger.debug(
+            { count: dueTasks.length },
+            'Shabbat/Yom Tov active, skipping due tasks',
+          );
+        }
+        setTimeout(loop, SCHEDULER_POLL_INTERVAL);
+        return;
+      }
+
       if (dueTasks.length > 0) {
         logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
@@ -261,6 +283,13 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
+
+        // Advance next_run BEFORE enqueuing to prevent the next poll from
+        // re-discovering this task while it's still running. Without this,
+        // a long-running task gets enqueued again on the next 60s poll cycle
+        // and executes a second time once the first run finishes.
+        const nextRun = computeNextRun(currentTask);
+        updateTask(currentTask.id, { next_run: nextRun });
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),

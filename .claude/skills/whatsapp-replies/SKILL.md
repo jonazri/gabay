@@ -12,22 +12,27 @@ Adds WhatsApp reply/quote threading to NanoClaw:
 - **Persistence**: Stores reply fields in the `messages` SQLite table with auto-migration
 - **RAG**: Indexes reply context in Qdrant alongside message content
 
-Depends on: `whatsapp-search`
+Depends on: `skill/whatsapp`, `skill/whatsapp-search`
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `whatsapp-replies` is in `applied_skills`, skip to Phase 4 (Verify).
+Check if `src/router.ts` contains `replied_to_id` — if so, skip to Phase 4 (Verify).
 
-### Check dependency
+### Check dependencies
 
-Confirm `whatsapp-search` is in `.nanoclaw/installed-skills.yaml` and applied first.
+Confirm WhatsApp and whatsapp-search skills are merged:
+```bash
+git log --oneline --merges | grep -E 'skill/(whatsapp|whatsapp-search)'
+```
 
 ## Phase 2: Apply Code Changes
 
 ```bash
-npm run apply-skills
+git fetch origin skill/whatsapp-replies
+git merge origin/skill/whatsapp-replies
+npm install
 ```
 
 No post-apply config required. DB migration runs automatically on next startup.
@@ -39,7 +44,7 @@ npm run build
 npx vitest run
 ```
 
-Expected: all tests pass (includes 9 new reply-context tests).
+Expected: all tests pass (includes reply-context tests).
 
 ## Phase 3: Build and Restart
 

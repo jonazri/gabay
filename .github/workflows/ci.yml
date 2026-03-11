@@ -21,9 +21,6 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Apply skills
-        run: npm run apply-skills
-
       - name: Typecheck
         run: npx tsc --noEmit
 

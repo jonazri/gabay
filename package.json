@@ -5,10 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsx scripts/apply-skills.ts && tsc && tsx scripts/clean-skills.ts --force && tsx scripts/apply-skills.ts --deps-only",
-    "build:quick": "tsc",
+    "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx scripts/apply-skills.ts && tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
@@ -19,16 +18,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "generate-zmanim": "tsx scripts/generate-zmanim.ts",
-    "apply-skills": "tsx scripts/apply-skills.ts",
-    "clean-skills": "tsx scripts/clean-skills.ts",
-    "package-skill": "tsx scripts/package-skill.ts",
-    "build:container": "tsx scripts/apply-skills.ts && ./container/build.sh && tsx scripts/clean-skills.ts --force"
+    "build:container": "./container/build.sh"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.36.0",
     "@hebcal/core": "^6.0.8",
-    "@types/qrcode-terminal": "^0.12.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
     "pino": "^9.6.0",
@@ -36,10 +29,13 @@
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "yaml": "^2.8.2",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@elevenlabs/elevenlabs-js": "^2.36.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
+    "@types/qrcode-terminal": "^0.12.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.0.18",
     "husky": "^9.1.7",

@@ -22,13 +22,17 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    sqlite3 \
     curl \
     git \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+# Use system CA certs so Node.js fetch/WebFetch works with HTTPS
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
@@ -45,17 +49,30 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Install google-home CLI wrapper
+COPY skills/google-home/google-home /usr/local/bin/google-home
+RUN chmod +x /usr/local/bin/google-home
+
 # Build TypeScript
 RUN npm run build
 
+# Install akiflow CLI dispatcher
+COPY skills/akiflow/akiflow /usr/local/bin/akiflow
+RUN chmod +x /usr/local/bin/akiflow
+
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/responses /workspace/sockets
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Install perplexity CLI wrapper (needs python3 for JSON formatting)
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+COPY skills/perplexity-research/perplexity /usr/local/bin/perplexity
+RUN chmod +x /usr/local/bin/perplexity
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node

@@ -58,14 +58,31 @@ describe('escapeXml', () => {
 // --- formatMessages ---
 
 describe('formatMessages', () => {
-  const TZ = 'UTC';
+  it('formats a single message as XML', () => {
+    const result = formatMessages([makeMsg()]);
+    expect(result).toBe(
+      '<context timezone="UTC" />\n' +
+        '<messages>\n' +
+        '<message id="1" sender="Alice" time="Jan 1, 2024, 12:00 AM">hello</message>\n' +
+        '</messages>',
+    );
+  });
 
-  it('formats a single message as XML with context header', () => {
-    const result = formatMessages([makeMsg()], TZ);
-    expect(result).toContain('<context timezone="UTC" />');
-    expect(result).toContain('<message sender="Alice"');
-    expect(result).toContain('>hello</message>');
-    expect(result).toContain('Jan 1, 2024');
+  it('includes message id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'msg-xyz' })]);
+    expect(result).toContain('id="msg-xyz"');
+  });
+
+  it('includes id attribute in reply branch', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'reply-123', replied_to_content: 'Original message' }),
+    ]);
+    expect(result).toContain('id="reply-123"');
+  });
+
+  it('escapes special characters in id attribute', () => {
+    const result = formatMessages([makeMsg({ id: 'id-"&"' })]);
+    expect(result).toContain('id="id-&quot;&amp;&quot;"');
   });
 
   it('formats multiple messages', () => {
@@ -74,16 +91,11 @@ describe('formatMessages', () => {
         id: '1',
         sender_name: 'Alice',
         content: 'hi',
-        timestamp: '2024-01-01T00:00:00.000Z',
+        timestamp: 't1',
       }),
-      makeMsg({
-        id: '2',
-        sender_name: 'Bob',
-        content: 'hey',
-        timestamp: '2024-01-01T01:00:00.000Z',
-      }),
+      makeMsg({ id: '2', sender_name: 'Bob', content: 'hey', timestamp: 't2' }),
     ];
-    const result = formatMessages(msgs, TZ);
+    const result = formatMessages(msgs);
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
     expect(result).toContain('>hi</message>');
@@ -91,35 +103,53 @@ describe('formatMessages', () => {
   });
 
   it('escapes special characters in sender names', () => {
-    const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })], TZ);
+    const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })]);
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
   });
 
   it('escapes special characters in content', () => {
-    const result = formatMessages(
-      [makeMsg({ content: '<script>alert("xss")</script>' })],
-      TZ,
-    );
+    const result = formatMessages([
+      makeMsg({ content: '<script>alert("xss")</script>' }),
+    ]);
     expect(result).toContain(
       '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
     );
   });
 
   it('handles empty array', () => {
-    const result = formatMessages([], TZ);
-    expect(result).toContain('<context timezone="UTC" />');
-    expect(result).toContain('<messages>\n\n</messages>');
+    const result = formatMessages([]);
+    expect(result).toBe(
+      '<context timezone="UTC" />\n<messages>\n\n</messages>',
+    );
   });
 
-  it('converts timestamps to local time for given timezone', () => {
-    // 2024-01-01T18:30:00Z in America/New_York (EST) = 1:30 PM
-    const result = formatMessages(
-      [makeMsg({ timestamp: '2024-01-01T18:30:00.000Z' })],
-      'America/New_York',
-    );
-    expect(result).toContain('1:30');
-    expect(result).toContain('PM');
-    expect(result).toContain('<context timezone="America/New_York" />');
+  it('includes reply context as nested XML when present', () => {
+    const msg = makeMsg({
+      replied_to_id: 'abc123',
+      replied_to_sender: 'Bob',
+      replied_to_content: 'Original message here',
+    });
+    const result = formatMessages([msg]);
+    expect(result).toContain('replied_to_id="abc123"');
+    expect(result).toContain('replied_to_sender="Bob"');
+    expect(result).toContain('<reply_to>Original message here</reply_to>');
+  });
+
+  it('omits reply attributes when not present', () => {
+    const result = formatMessages([makeMsg()]);
+    expect(result).not.toContain('replied_to_id');
+    expect(result).not.toContain('<reply_to>');
+  });
+
+  it('escapes special chars in reply context', () => {
+    const msg = makeMsg({
+      replied_to_id: 'x1',
+      replied_to_sender: 'A & B',
+      replied_to_content: '<script>xss</script>',
+    });
+    const result = formatMessages([msg]);
+    expect(result).toContain('replied_to_sender="A &amp; B"');
+    expect(result).toContain('&lt;script&gt;xss&lt;/script&gt;');
   });
 });
 

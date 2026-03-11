@@ -30,14 +30,16 @@ function macTimeToIso(macTime: number): string {
 const args = process.argv.slice(2);
 const backupPathIndex = args.indexOf('--backup-path');
 const backupPathArg =
-  args.find(a => a.startsWith('--backup-path='))?.split('=')[1] ||
+  args.find((a) => a.startsWith('--backup-path='))?.split('=')[1] ||
   (backupPathIndex >= 0 && backupPathIndex + 1 < args.length
     ? args[backupPathIndex + 1]
     : undefined);
 const dryRun = args.includes('--dry-run');
 
 if (!backupPathArg) {
-  console.error('Usage: npx tsx scripts/import-whatsapp-backup.ts --backup-path /path/to/ChatStorage.sqlite [--dry-run]');
+  console.error(
+    'Usage: npx tsx scripts/import-whatsapp-backup.ts --backup-path /path/to/ChatStorage.sqlite [--dry-run]',
+  );
   process.exit(1);
 }
 
@@ -47,12 +49,21 @@ if (!fs.existsSync(backupPath)) {
   process.exit(1);
 }
 
-// --- Dynamic imports for RAG service (only loads after npm run apply-skills) ---
+// --- Dynamic imports for RAG service (optional, only available when whatsapp-search skill is installed) ---
 async function importRagDeps() {
   const { getConfig, loadConfig } = await import('../rag-system/src/config.js');
-  const { initialize: initEmbeddings, embedBatch } = await import('../rag-system/src/embeddings.js');
-  const { qdrantClient, messageIdToUuid } = await import('../rag-system/src/database/qdrant-client.js');
-  return { getConfig, loadConfig, initEmbeddings, embedBatch, qdrantClient, messageIdToUuid };
+  const { initialize: initEmbeddings, embedBatch } =
+    await import('../rag-system/src/embeddings.js');
+  const { qdrantClient, messageIdToUuid } =
+    await import('../rag-system/src/database/qdrant-client.js');
+  return {
+    getConfig,
+    loadConfig,
+    initEmbeddings,
+    embedBatch,
+    qdrantClient,
+    messageIdToUuid,
+  };
 }
 
 interface BackupMessage {
@@ -69,8 +80,14 @@ interface BackupMessage {
   quoted_sender_jid: string | null;
 }
 
-function queryBackupMessages(db: Database.Database, afterMacTime: number, limit: number): BackupMessage[] {
-  return db.prepare(`
+function queryBackupMessages(
+  db: Database.Database,
+  afterMacTime: number,
+  limit: number,
+): BackupMessage[] {
+  return db
+    .prepare(
+      `
     SELECT
       m.ZSTANZAID       AS stanza_id,
       m.ZTEXT           AS text,
@@ -95,19 +112,30 @@ function queryBackupMessages(db: Database.Database, afterMacTime: number, limit:
       AND cs.ZCONTACTJID IS NOT NULL
     ORDER BY m.ZTIMESTAMP ASC
     LIMIT ?
-  `).all(afterMacTime, limit) as BackupMessage[];
+  `,
+    )
+    .all(afterMacTime, limit) as BackupMessage[];
 }
 
-const WATERMARK_PATH = path.join(process.cwd(), 'rag-system', 'data', 'backup-import-watermark.json');
+const WATERMARK_PATH = path.join(
+  process.cwd(),
+  'rag-system',
+  'data',
+  'backup-import-watermark.json',
+);
 const BATCH_SIZE = 50;
 const RATE_LIMIT_DELAY_MS = 1000;
 
 function readWatermark(): number {
   try {
     if (fs.existsSync(WATERMARK_PATH)) {
-      return JSON.parse(fs.readFileSync(WATERMARK_PATH, 'utf-8')).lastMacTime ?? 0;
+      return (
+        JSON.parse(fs.readFileSync(WATERMARK_PATH, 'utf-8')).lastMacTime ?? 0
+      );
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return 0;
 }
 
@@ -132,8 +160,11 @@ async function phase1RagImport(
     if (messages.length === 0) break;
 
     batchNum++;
-    const texts = messages.map(m => {
-      const sender = m.sender_name || m.sender_jid?.split('@')[0] || (m.is_from_me ? 'Me' : 'Unknown');
+    const texts = messages.map((m) => {
+      const sender =
+        m.sender_name ||
+        m.sender_jid?.split('@')[0] ||
+        (m.is_from_me ? 'Me' : 'Unknown');
       const group = m.chat_name ? ` [${m.chat_name}]` : '';
       return `${sender}${group}: ${m.text}`;
     });
@@ -163,18 +194,26 @@ async function phase1RagImport(
       writeWatermark(lastMacTime);
     }
 
-    console.log(`  Batch ${batchNum}: ${messages.length} messages (up to ${macTimeToIso(messages[messages.length - 1].mac_timestamp)})`);
+    console.log(
+      `  Batch ${batchNum}: ${messages.length} messages (up to ${macTimeToIso(messages[messages.length - 1].mac_timestamp)})`,
+    );
 
     if (messages.length === BATCH_SIZE) {
-      await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS));
+      await new Promise((r) => setTimeout(r, RATE_LIMIT_DELAY_MS));
     }
   }
 
-  console.log(`Phase 1 complete: ${totalUpserted} messages ${dryRun ? '(dry run)' : 'upserted to Qdrant'}`);
+  console.log(
+    `Phase 1 complete: ${totalUpserted} messages ${dryRun ? '(dry run)' : 'upserted to Qdrant'}`,
+  );
 }
 
-async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void> {
-  console.log('\n=== Phase 2: NanoClaw DB augmentation (registered chats only) ===');
+async function phase2NanoclawAugment(
+  backupDb: Database.Database,
+): Promise<void> {
+  console.log(
+    '\n=== Phase 2: NanoClaw DB augmentation (registered chats only) ===',
+  );
 
   // Dynamically load NanoClaw DB path
   const { STORE_DIR } = await import('../src/config.js');
@@ -188,9 +227,15 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
 
   // Get registered group JIDs from NanoClaw
   const registeredJids: Set<string> = new Set(
-    (nanoclawDb.prepare('SELECT jid FROM registered_groups').all() as { jid: string }[]).map(r => r.jid)
+    (
+      nanoclawDb.prepare('SELECT jid FROM registered_groups').all() as {
+        jid: string;
+      }[]
+    ).map((r) => r.jid),
   );
-  console.log(`  Found ${registeredJids.size} registered groups: ${[...registeredJids].join(', ')}`);
+  console.log(
+    `  Found ${registeredJids.size} registered groups: ${[...registeredJids].join(', ')}`,
+  );
 
   if (registeredJids.size === 0) {
     console.log('  No registered groups found, skipping Phase 2');
@@ -198,7 +243,9 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
   }
 
   // Query backup messages for registered chats only
-  const backupRegistered = backupDb.prepare(`
+  const backupRegistered = backupDb
+    .prepare(
+      `
     SELECT
       m.ZSTANZAID       AS stanza_id,
       m.ZTEXT           AS text,
@@ -218,9 +265,13 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
     WHERE m.ZSTANZAID IS NOT NULL
       AND cs.ZCONTACTJID IN (${[...registeredJids].map(() => '?').join(',')})
     ORDER BY m.ZTIMESTAMP ASC
-  `).all(...registeredJids) as BackupMessage[];
+  `,
+    )
+    .all(...registeredJids) as BackupMessage[];
 
-  console.log(`  Found ${backupRegistered.length} messages in registered chats from backup`);
+  console.log(
+    `  Found ${backupRegistered.length} messages in registered chats from backup`,
+  );
 
   let updated = 0;
   let inserted = 0;
@@ -240,7 +291,10 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
   `);
 
   for (const m of backupRegistered) {
-    if (!m.text) { skipped++; continue; }
+    if (!m.text) {
+      skipped++;
+      continue;
+    }
     const ts = macTimeToIso(m.mac_timestamp);
     const sender = m.sender_jid || m.chat_jid;
     const senderName = m.sender_name || sender.split('@')[0];
@@ -248,17 +302,27 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
     if (!dryRun) {
       if (m.quoted_stanza_id) {
         const result = updateStmt.run(
-          m.quoted_stanza_id, m.quoted_sender_jid || null, m.quoted_text || null,
-          m.stanza_id, m.chat_jid
+          m.quoted_stanza_id,
+          m.quoted_sender_jid || null,
+          m.quoted_text || null,
+          m.stanza_id,
+          m.chat_jid,
         );
         if (result.changes > 0) updated++;
       }
 
       // Insert missing messages (pre-registration history)
       const insertResult = insertStmt.run(
-        m.stanza_id, m.chat_jid, sender, senderName, m.text, ts,
+        m.stanza_id,
+        m.chat_jid,
+        sender,
+        senderName,
+        m.text,
+        ts,
         m.is_from_me ? 1 : 0,
-        m.quoted_stanza_id || null, m.quoted_sender_jid || null, m.quoted_text || null,
+        m.quoted_stanza_id || null,
+        m.quoted_sender_jid || null,
+        m.quoted_text || null,
       );
       if (insertResult.changes > 0) inserted++;
     } else {
@@ -268,7 +332,9 @@ async function phase2NanoclawAugment(backupDb: Database.Database): Promise<void>
   }
 
   nanoclawDb.close();
-  console.log(`Phase 2 complete: ${updated} updated, ${inserted} inserted, ${skipped} skipped ${dryRun ? '(dry run)' : ''}`);
+  console.log(
+    `Phase 2 complete: ${updated} updated, ${inserted} inserted, ${skipped} skipped ${dryRun ? '(dry run)' : ''}`,
+  );
 }
 
 async function main(): Promise<void> {
@@ -276,9 +342,15 @@ async function main(): Promise<void> {
   const backupDb = new Database(backupPath, { readonly: true });
 
   // Verify expected table exists
-  const tables = backupDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='ZWAMESSAGE'`).get();
+  const tables = backupDb
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='ZWAMESSAGE'`,
+    )
+    .get();
   if (!tables) {
-    console.error('ZWAMESSAGE table not found — is this an iPhone WhatsApp backup (ChatStorage.sqlite)?');
+    console.error(
+      'ZWAMESSAGE table not found — is this an iPhone WhatsApp backup (ChatStorage.sqlite)?',
+    );
     process.exit(1);
   }
 
@@ -297,7 +369,7 @@ async function main(): Promise<void> {
   console.log('\nImport complete.');
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Import failed:', err);
   process.exit(1);
 });

@@ -41,10 +41,11 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    quoted_message_id: z.string().optional().describe('ID of the message to reply to. Threads your response as a WhatsApp reply.'),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -52,6 +53,7 @@ server.tool(
       chatJid,
       text: args.text,
       sender: args.sender || undefined,
+      quotedMessageId: args.quoted_message_id || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
@@ -59,6 +61,42 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z
+      .string()
+      .describe(
+        'The emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\udd25")',
+      ),
+    message_id: z
+      .string()
+      .optional()
+      .describe(
+        'The message ID to react to. If omitted, reacts to the latest message in the chat.',
+      ),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [
+        { type: 'text' as const, text: `Reaction ${args.emoji} sent.` },
+      ],
+    };
   },
 );
 
