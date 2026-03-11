@@ -1,0 +1,9 @@
+{
+  "name": "feature-request",
+  "description": "Container agent can write feature request PRDs for the host to review",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["feature-request", "agent", "prd"]
+}
