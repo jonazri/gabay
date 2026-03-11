@@ -1,17 +1,16 @@
-# WhatsApp Replies
-See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context.
+# Voice Transcription (ElevenLabs)
+Voice message transcription via ElevenLabs Scribe v2.
 
 ## Prerequisites
-- skill/whatsapp
-- skill/whatsapp-search
+- skill/reactions
 
 ## Installation
-1. `git fetch origin skill/whatsapp-replies`
-2. `git merge origin/skill/whatsapp-replies`
+1. `git fetch origin skill/voice-transcription-elevenlabs`
+2. `git merge origin/skill/voice-transcription-elevenlabs`
 3. `npm install`
 
 ## Verification
 - `npm run build && npm test`
 
 ## Environment Variables
-None
+- `ELEVENLABS_API_KEY` — ElevenLabs API key for voice transcription
