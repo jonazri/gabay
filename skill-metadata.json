@@ -1,9 +1,9 @@
 {
-  "name": "voice-transcription-elevenlabs",
-  "description": "Voice message transcription via ElevenLabs Scribe v2",
+  "name": "voice-recognition",
+  "description": "Speaker recognition using PyAnnote voice embeddings",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": ["reactions"],
-  "env": ["ELEVENLABS_API_KEY"],
-  "tags": ["voice", "transcription", "elevenlabs"]
+  "depends": ["voice-transcription-elevenlabs"],
+  "env": [],
+  "tags": ["voice", "recognition", "speaker", "pyannote"]
 }

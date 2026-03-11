@@ -35,7 +35,7 @@ vi.mock('../transcription.js', () => ({
   isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
   transcribeAudioMessage: vi
     .fn()
-    .mockResolvedValue('Hello this is a voice message'),
+    .mockResolvedValue({ transcript: 'Hello this is a voice message', audioBuffer: Buffer.from('fake') }),
 }));
 
 import { transcribeAudioMessage } from '../transcription.js';
@@ -579,7 +579,7 @@ describe('WhatsAppChannel', () => {
     });
 
     it('falls back when transcription returns null', async () => {
-      vi.mocked(transcribeAudioMessage).mockResolvedValueOnce(null);
+      vi.mocked(transcribeAudioMessage).mockResolvedValueOnce({ transcript: null, audioBuffer: null });
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);

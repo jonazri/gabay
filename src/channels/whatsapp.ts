@@ -20,7 +20,7 @@ import {
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { getLatestMessage, storeReaction } from '../db.js';
 import { logger } from '../logger.js';
-import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+import { isVoiceMessage, transcribeAudioMessage, TranscriptionResult } from '../transcription.js';
 import {
   Channel,
   OnInboundMessage,
@@ -232,14 +232,14 @@ export class WhatsAppChannel implements Channel {
             let finalContent = content;
             if (isVoiceMessage(msg)) {
               try {
-                const transcript = await transcribeAudioMessage(
+                const result: TranscriptionResult = await transcribeAudioMessage(
                   msg,
                   this.sock,
                 );
-                if (transcript) {
-                  finalContent = `[Voice: ${transcript}]`;
+                if (result.transcript) {
+                  finalContent = `[Voice: ${result.transcript}]`;
                   logger.info(
-                    { chatJid, length: transcript.length },
+                    { chatJid, length: result.transcript.length },
                     'Transcribed voice message',
                   );
                 } else {
