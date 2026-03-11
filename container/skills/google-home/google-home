@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+// google-home — Socket client for Google Assistant commands inside agent containers
+// Connects to the host-side socket server for fast, direct communication.
+
+'use strict';
+
+const net = require('net');
+
+const SOCKET_PATH = '/workspace/sockets/google-assistant.sock';
+const TIMEOUT_MS = 60000;
+
+function genRequestId() {
+  return `gh-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+}
+
+function usage() {
+  console.log(
+`google-home — Control smart home devices via Google Assistant
+
+Usage:
+  google-home command "turn on the living room lights"
+  google-home status
+  google-home reset
+  google-home automation
+  google-home help
+
+Subcommands:
+  command "text"   Send a text command to Google Assistant
+  status           Check Google Assistant health
+  reset            Reset the conversation state
+  automation       Show automation help (YAML generation)
+  help             Show this help message`
+  );
+}
+
+function automationHelp() {
+  console.log(
+`Google Home Automations
+
+Automations are defined as YAML and pushed via the Google Home web UI using
+the agent-browser skill. The YAML schema is documented in SKILL.md.
+
+Workflow:
+  1. Generate the automation YAML based on the user's request
+  2. Use agent-browser to navigate to home.google.com
+  3. Create the automation through the web UI
+
+No IPC is needed for automation management — the agent handles it directly
+using the browser skill and the YAML schema from SKILL.md.`
+  );
+}
+
+function sendCommand(cmd, text) {
+  const requestId = genRequestId();
+  const sourceGroup = process.env.NANOCLAW_GROUP_FOLDER || '';
+  const chatJid = process.env.NANOCLAW_CHAT_JID || '';
+
+  const request = JSON.stringify({ cmd, text, requestId, sourceGroup, chatJid }) + '\n';
+
+  const socket = net.createConnection(SOCKET_PATH);
+  let buffer = '';
+  let responded = false;
+
+  socket.setTimeout(TIMEOUT_MS);
+
+  socket.on('connect', () => {
+    socket.write(request);
+  });
+
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    const idx = buffer.indexOf('\n');
+    if (idx === -1) return;
+
+    responded = true;
+    const line = buffer.slice(0, idx);
+    try {
+      const response = JSON.parse(line);
+      if (response.error) {
+        console.error('Error: ' + response.error);
+        socket.destroy();
+        process.exitCode = 1;
+        return;
+      }
+      console.log(response.text || response.status || JSON.stringify(response));
+    } catch {
+      console.log(line);
+    }
+    socket.destroy();
+  });
+
+  socket.on('timeout', () => {
+    if (!responded) {
+      console.log('Command sent. Response timed out (60s) \u2014 the command is still being processed. The result will be delivered via IPC to the user\u2019s chat.');
+      socket.destroy();
+    }
+  });
+
+  socket.on('error', (err) => {
+    if (!responded) {
+      console.error('Error: Could not connect to Google Assistant socket: ' + err.message);
+      process.exitCode = 1;
+    }
+  });
+}
+
+const subcommand = process.argv[2] || 'help';
+const args = process.argv.slice(3);
+
+switch (subcommand) {
+  case 'command':
+    if (!args[0]) {
+      console.error('Error: command requires a text argument');
+      console.error('Usage: google-home command "turn on the lights"');
+      process.exitCode = 1;
+      break;
+    }
+    sendCommand('command', args[0]);
+    break;
+  case 'status':
+    sendCommand('health', '');
+    break;
+  case 'reset':
+    sendCommand('reset', '');
+    break;
+  case 'automation':
+    automationHelp();
+    break;
+  case 'help':
+  case '--help':
+  case '-h':
+    usage();
+    break;
+  default:
+    console.error("Error: Unknown subcommand '" + subcommand + "'");
+    usage();
+    process.exitCode = 1;
+    break;
+}

@@ -47,6 +47,15 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import './ipc-handlers/group-lifecycle.js';
 import { startIpcWatcher } from './ipc.js';
+import {
+  initGoogleAssistantDaemon,
+  shutdownGoogleAssistant,
+  startGoogleAssistantSocket,
+  startGoogleTokenScheduler,
+  stopGoogleAssistantSocket,
+  stopGoogleTokenScheduler,
+} from './google-assistant.js';
+import './ipc-handlers/google-home.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -534,6 +543,9 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
     await queue.shutdown(10000);
+    stopGoogleTokenScheduler();
+    stopGoogleAssistantSocket();
+    shutdownGoogleAssistant();
     for (const ch of channels) await ch.disconnect();
     await runShutdownHooks();
     process.exit(0);
@@ -633,6 +645,16 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+  startGoogleTokenScheduler((msg) => {
+    const mainJid = Object.entries(registeredGroups).find(
+      ([_, g]) => g.isMain === true,
+    )?.[0];
+    if (!mainJid) return;
+    const ch = findChannel(channels, mainJid);
+    ch?.sendMessage(mainJid, `[system] ${msg}`);
+  });
+  startGoogleAssistantSocket();
+  initGoogleAssistantDaemon().catch(() => {}); // fire-and-forget, errors already logged
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

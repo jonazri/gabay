@@ -1,9 +1,9 @@
 {
-  "name": "group-lifecycle",
-  "description": "Group unregistration via IPC for dynamic group management",
+  "name": "google-home",
+  "description": "Smart home control via Google Assistant with Unix socket bridge",
   "version": "1.0.0",
   "author": "jonazri",
   "depends": ["lifecycle-hooks", "ipc-handler-registry"],
   "env": [],
-  "tags": ["groups", "lifecycle", "ipc"]
+  "tags": ["smart-home", "google", "assistant"]
 }
