@@ -239,9 +239,9 @@ Within each tier, process in `installed-skills.yaml` order to minimize unexpecte
 - container-hardening
 - task-scheduler-fixes
 - whatsapp-search (modifies only `src/container-runner.ts` — a core file)
-- whatsapp-summary (adds container skill only — no file dependencies)
 - perplexity-research
 - feature-request
+- whatsapp-summary (adds container skill only — no file dependencies)
 
 **Tier 2 (depends on Tier 1, can run in parallel after Tier 1):**
 - group-lifecycle (branch from: lifecycle-hooks, merge: ipc-handler-registry)
@@ -264,7 +264,7 @@ Within each tier, process in `installed-skills.yaml` order to minimize unexpecte
 Before composing, validate each skill branch independently:
 
 ```bash
-for branch in $(git branch --list 'skill/*'); do
+git branch --format='%(refname:short)' --list 'skill/*' | while read -r branch; do
   git checkout "$branch"
   npm run build && npm test
 done
@@ -284,9 +284,9 @@ git merge skill/ipc-handler-registry
 git merge skill/container-hardening
 git merge skill/task-scheduler-fixes
 git merge skill/whatsapp-search
-git merge skill/whatsapp-summary
 git merge skill/perplexity-research
 git merge skill/feature-request
+git merge skill/whatsapp-summary
 
 # Tier 2 (children of Tier 1)
 git merge skill/group-lifecycle
@@ -313,7 +313,7 @@ Git handles composition. Conflicts (if any) are resolved interactively.
 - Delete `.nanoclaw/installed-skills.yaml` from git; delete generated state (`state.yaml`, `base/`) from working tree (`.nanoclaw/` is gitignored except `installed-skills.yaml`)
 - Delete `skills-engine/` directory (entire engine, if not already removed by upstream merge)
 - Delete overlay-specific artifacts from `.claude/skills/*/`: `add/`, `modify/`, `tests/`, `manifest.yaml`. Keep non-overlay code/assets (e.g., `x-integration/` has `agent.ts`, `host.ts`, `lib/`, `scripts/` that are not overlays)
-- Remove old npm scripts from package.json: `apply-skills`, `clean-skills`, `package-skill`, `build:quick`, `build:container`
+- Remove old npm scripts from package.json: `apply-skills`, `clean-skills`, `package-skill`, `build:quick`
 - Update `build` script: currently `tsx scripts/apply-skills.ts && tsc && ...`; should become just `tsc`
 - Update `build:container` or remove: currently wraps apply-skills + container build; should become just `./container/build.sh`
 - Update `dev` script — currently runs apply-skills; should become `tsx watch src/index.ts` or equivalent
