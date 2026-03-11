@@ -758,6 +758,7 @@ akiflow:list-events() {
     case "$1" in
       --format|--limit) flags+=("$1" "$2"); shift 2 ;;
       --utc) _AKIFLOW_UTC=1; shift ;;
+      --*) shift ;;
       *)
         if [[ "$period" == "today" && "$1" != "today" ]]; then
           period="$1"
