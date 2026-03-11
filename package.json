@@ -25,6 +25,7 @@
     "build:container": "tsx scripts/apply-skills.ts && ./container/build.sh && tsx scripts/clean-skills.ts --force"
   },
   "dependencies": {
+    "@hebcal/core": "^6.0.8",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
     "pino": "^9.6.0",

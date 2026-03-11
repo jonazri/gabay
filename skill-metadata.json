@@ -1,9 +1,9 @@
 {
-  "name": "lifecycle-hooks",
-  "description": "Lifecycle hook registry for startup, shutdown, channels-ready, and processing guards",
+  "name": "shabbat-mode",
+  "description": "Pause all activity during Shabbat and Yom Tov",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": [],
+  "depends": ["lifecycle-hooks"],
   "env": [],
-  "tags": ["lifecycle", "hooks", "infrastructure"]
+  "tags": ["shabbat", "scheduling", "jewish"]
 }
