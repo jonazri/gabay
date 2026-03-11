@@ -37,6 +37,7 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  deleteRegisteredGroup,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -603,6 +604,11 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    unregisterGroup: (jid: string) => {
+      const existed = deleteRegisteredGroup(jid);
+      if (existed) delete registeredGroups[jid];
+      return existed;
+    },
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels
