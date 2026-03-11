@@ -69,11 +69,13 @@ main
 ├── skill/ipc-handler-registry
 ├── skill/whatsapp                    (includes whatsapp-types content — qrcode-terminal types)
 │   ├── skill/reactions               (modifies whatsapp.ts — file added by whatsapp)
-│       │   └── skill/voice-transcription-elevenlabs  (depends: reactions, modifies whatsapp.ts)
-│       │       └── skill/voice-recognition           (depends: voice-transcription-elevenlabs)
-│       └── skill/whatsapp-replies    (modifies whatsapp.ts + depends: whatsapp-search)
+│   │   └── skill/voice-transcription-elevenlabs  (depends: reactions, modifies whatsapp.ts)
+│   │       └── skill/voice-recognition           (depends: voice-transcription-elevenlabs)
+│   └── skill/whatsapp-replies        (modifies whatsapp.ts + depends: whatsapp-search)
 ├── skill/container-hardening
 │   └── skill/akiflow-sync           (depends: container-hardening)
+├── skill/group-lifecycle             (branch from lifecycle-hooks, merge ipc-handler-registry)
+├── skill/google-home                 (branch from lifecycle-hooks, merge ipc-handler-registry)
 ├── skill/task-scheduler-fixes
 ├── skill/whatsapp-search             (modifies only core files — no whatsapp dependency)
 ├── skill/whatsapp-summary            (adds container skill only — no dependencies)
@@ -191,6 +193,7 @@ Process in dependency order (parents before children). Dependencies are based on
 Within each tier, process in `installed-skills.yaml` order to minimize unexpected interactions when skills modify the same files (e.g., multiple skills modify `container/Dockerfile` in non-overlapping locations).
 
 - lifecycle-hooks
+- whatsapp (includes whatsapp-types content — no parent dependency)
 - ipc-handler-registry
 - container-hardening
 - task-scheduler-fixes
@@ -200,7 +203,6 @@ Within each tier, process in `installed-skills.yaml` order to minimize unexpecte
 - feature-request
 
 **Tier 2 (depends on Tier 1, can run in parallel after Tier 1):**
-- whatsapp (branch from: main — includes whatsapp-types content)
 - group-lifecycle (branch from: lifecycle-hooks, merge: ipc-handler-registry)
 - google-home (branch from: lifecycle-hooks, merge: ipc-handler-registry)
 - shabbat-mode (branch from: lifecycle-hooks)
@@ -236,6 +238,7 @@ Merge all skill branches into main in dependency order:
 ```bash
 # Tier 1 (independent — branch from main, in installed-skills.yaml order)
 git merge skill/lifecycle-hooks
+git merge skill/whatsapp
 git merge skill/ipc-handler-registry
 git merge skill/container-hardening
 git merge skill/task-scheduler-fixes
@@ -245,7 +248,6 @@ git merge skill/perplexity-research
 git merge skill/feature-request
 
 # Tier 2 (children of Tier 1)
-git merge skill/whatsapp
 git merge skill/group-lifecycle
 git merge skill/google-home
 git merge skill/shabbat-mode
@@ -268,10 +270,13 @@ Git handles composition. Conflicts (if any) are resolved interactively.
 - Delete `.nanoclaw/installed-skills.yaml` from git; delete generated state (`state.yaml`, `base/`) from working tree (`.nanoclaw/` is gitignored except `installed-skills.yaml`)
 - Delete `skills-engine/` directory (entire engine, if not already removed by upstream merge)
 - Delete overlay-specific artifacts from `.claude/skills/*/`: `add/`, `modify/`, `tests/`, `manifest.yaml`. Keep non-overlay code/assets (e.g., `x-integration/` has `agent.ts`, `host.ts`, `lib/`, `scripts/` that are not overlays)
-- Remove old npm scripts from package.json (apply-skills, clean-skills, package-skill, build:quick)
+- Remove old npm scripts from package.json: `apply-skills`, `clean-skills`, `package-skill`, `build:quick`, `build:container`
+- Update `build` script: currently `tsx scripts/apply-skills.ts && tsc && ...`; should become just `tsc`
+- Update `build:container` or remove: currently wraps apply-skills + container build; should become just `./container/build.sh`
 - Update `dev` script — currently runs apply-skills; should become `tsx watch src/index.ts` or equivalent
+- Delete fork-specific script files no longer needed: `scripts/apply-skills.ts`, `scripts/clean-skills.ts`, `scripts/package-skill.ts` (note: `scripts/apply-skill.ts` singular and `scripts/uninstall-skill.ts` are handled in Phase 2 upstream merge)
 
-**Non-installed skill overlay files:** `.claude/skills/` contains 41 directories total (including operational skills like `setup/`, `debug/`, `x-integration/` that have no overlays). Non-installed skills with overlay artifacts (`add/`, `modify/`, `manifest.yaml`) to clean up: add-discord, add-gmail, add-image-vision, add-ollama-tool, add-pdf-reader, add-slack, add-telegram, add-compact, add-voice-transcription (original, pre-elevenlabs), convert-to-apple-container, use-local-whisper, add-whatsapp-resilience, add-regular-high-watcher, add-telegram-swarm, add-parallel. Remove their overlay artifacts during cleanup — they're replaced by upstream's SKILL.md-only versions or can be installed from upstream skill branches/channel forks later. Operational skill directories (SKILL.md-only, no overlays) are kept as-is.
+**Non-installed skill overlay files:** `.claude/skills/` contains 41 directories total (including operational skills like `setup/`, `debug/`, `x-integration/` that have no overlays). Non-installed skills with overlay artifacts (`add/`, `modify/`, `manifest.yaml`) to clean up: add-discord, add-gmail, add-image-vision, add-ollama-tool, add-pdf-reader, add-slack, add-telegram, add-compact, add-voice-transcription (original, pre-elevenlabs), convert-to-apple-container, use-local-whisper, add-whatsapp-resilience, add-regular-high-watcher. Note: `add-telegram-swarm` and `add-parallel` are already SKILL.md-only (no overlay artifacts) — no cleanup needed. Remove their overlay artifacts during cleanup — they're replaced by upstream's SKILL.md-only versions or can be installed from upstream skill branches/channel forks later. Operational skill directories (SKILL.md-only, no overlays) are kept as-is.
 
 **Skill directory naming:** Some skill directories don't follow the `add-` prefix convention (e.g., `ipc-handler-registry/`, `whatsapp-replies/`). The new skill branch names (`skill/<name>`) don't need prefixes, so this is a non-issue post-migration.
 
