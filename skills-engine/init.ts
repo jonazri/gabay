@@ -29,6 +29,41 @@ export function initNanoclawDir(): void {
   const nanoclawDir = path.join(projectRoot, NANOCLAW_DIR);
   const baseDir = path.join(projectRoot, BASE_DIR);
 
+  // Guard: refuse to snapshot dirty src/ or container/ — the base would be wrong
+  if (isGitRepo()) {
+    try {
+      execSync('git diff --quiet HEAD -- src/ container/', {
+        cwd: projectRoot,
+        stdio: 'pipe',
+      });
+    } catch {
+      const dirty = execSync('git diff --name-only HEAD -- src/ container/', {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+      }).trim();
+      console.error(
+        `Error: src/ or container/ has uncommitted changes — base snapshot would be wrong.\n` +
+          `Dirty files:\n${dirty}\n\n` +
+          `Fix: git checkout -- src/ container/ && git clean -fd src/ container/ && rm -rf .nanoclaw/base`,
+      );
+      process.exit(1);
+    }
+
+    // Also check for untracked files in src/ and container/
+    const untracked = execSync(
+      'git ls-files --others --exclude-standard src/ container/',
+      { cwd: projectRoot, encoding: 'utf-8' },
+    ).trim();
+    if (untracked) {
+      console.error(
+        `Error: Untracked files in src/ or container/ — base snapshot would be wrong.\n` +
+          `Untracked:\n${untracked}\n\n` +
+          `Fix: git clean -fd src/ container/ && rm -rf .nanoclaw/base`,
+      );
+      process.exit(1);
+    }
+  }
+
   // Create structure
   fs.mkdirSync(path.join(projectRoot, BACKUP_DIR), { recursive: true });
 

@@ -21,7 +21,8 @@
     "generate-zmanim": "tsx scripts/generate-zmanim.ts",
     "apply-skills": "tsx scripts/apply-skills.ts",
     "clean-skills": "tsx scripts/clean-skills.ts",
-    "package-skill": "tsx scripts/package-skill.ts"
+    "package-skill": "tsx scripts/package-skill.ts",
+    "build:container": "tsx scripts/apply-skills.ts && ./container/build.sh && tsx scripts/clean-skills.ts --force"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.36.0",
