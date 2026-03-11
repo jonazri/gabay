@@ -1,0 +1,9 @@
+{
+  "name": "whatsapp",
+  "description": "WhatsApp channel via Baileys (Multi-Device Web API)",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": ["ASSISTANT_HAS_OWN_NUMBER"],
+  "tags": ["channel", "whatsapp", "messaging"]
+}
