@@ -1,9 +1,9 @@
 {
-  "name": "akiflow-sync",
-  "description": "Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local DB, and conflict resolution",
+  "name": "reactions",
+  "description": "WhatsApp emoji reaction support with status tracking",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": ["container-hardening"],
-  "env": ["AKIFLOW_REFRESH_TOKEN", "AKIFLOW_DB_PATH"],
-  "tags": ["akiflow", "sync", "tasks", "productivity"]
+  "depends": ["whatsapp"],
+  "env": [],
+  "tags": ["whatsapp", "reactions", "emoji"]
 }

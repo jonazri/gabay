@@ -1,19 +1,17 @@
-# Akiflow Sync
-Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local DB, and conflict resolution.
+# Reactions
+WhatsApp emoji reaction support with status tracking.
 
 ## Prerequisites
-- skill/container-hardening
+- skill/whatsapp
 
 ## Installation
-1. `git fetch origin skill/akiflow-sync`
-2. `git merge origin/skill/akiflow-sync`
+1. `git fetch origin skill/reactions`
+2. `git merge origin/skill/reactions`
 3. `npm install`
-4. `cd akiflow-sync && npm install`
+4. Run `npx tsx scripts/migrate-reactions.ts` to add reaction columns to existing DB
 
 ## Verification
 - `npm run build && npm test`
-- `cd akiflow-sync && npm test`
 
 ## Environment Variables
-- `AKIFLOW_REFRESH_TOKEN` — Akiflow API refresh token
-- `AKIFLOW_DB_PATH` — Path to Akiflow SQLite database
+None
