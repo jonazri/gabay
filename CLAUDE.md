@@ -106,6 +106,10 @@ tail -f ~/code/yonibot/gabay/logs/nanoclaw.log
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+**Container can't reach credential proxy (ECONNREFUSED on port 3001):** UFW may be blocking Docker bridge traffic. Fix: `sudo ufw allow from 172.17.0.0/16 to any port 3001 proto tcp`
+
+**Env vars missing in containers (API keys not passed):** The systemd unit needs `EnvironmentFile`. Add `EnvironmentFile=/path/to/project/.env` to the `[Service]` section of the systemd unit, then `systemctl --user daemon-reload`.
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
