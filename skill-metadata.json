@@ -1,0 +1,9 @@
+{
+  "name": "container-hardening",
+  "description": "Container pipeline robustness: dead-process guards, log rotation, plugins sync",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["container", "infrastructure", "reliability"]
+}
