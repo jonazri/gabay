@@ -1,0 +1,363 @@
+{
+  "skills": [
+    {
+      "name": "lifecycle-hooks",
+      "skill_dir": "add-lifecycle-hooks",
+      "description": "Lifecycle hook registry for startup, shutdown, channels-ready, and processing guards",
+      "adds": [
+        "src/lifecycle.ts",
+        "src/lifecycle.test.ts",
+        "src/cursor-manager.ts",
+        "src/cursor-manager.test.ts",
+        "src/message-events.ts",
+        "src/message-events.test.ts"
+      ],
+      "modifies": ["src/index.ts"],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx vitest run src/lifecycle.test.ts src/cursor-manager.test.ts src/message-events.test.ts",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "whatsapp",
+      "skill_dir": "add-whatsapp",
+      "description": "WhatsApp channel via Baileys (Multi-Device Web API)",
+      "adds": [
+        "src/channels/whatsapp.ts",
+        "src/channels/whatsapp.test.ts",
+        "src/whatsapp-auth.ts",
+        "setup/whatsapp-auth.ts",
+        "src/qrcode-terminal.d.ts"
+      ],
+      "modifies": ["src/channels/index.ts", "setup/index.ts"],
+      "npm_dependencies": {
+        "@whiskeysockets/baileys": "^7.0.0-rc.9",
+        "qrcode": "^1.5.4",
+        "qrcode-terminal": "^0.12.0",
+        "@types/qrcode-terminal": "^0.12.0"
+      },
+      "env_vars": ["ASSISTANT_HAS_OWN_NUMBER"],
+      "depends": [],
+      "test": "npx vitest run src/channels/whatsapp.test.ts",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": [],
+      "notes": "Includes whatsapp-types content (src/qrcode-terminal.d.ts and npm deps @whiskeysockets/baileys, qrcode-terminal). whatsapp-types is NOT a separate branch."
+    },
+    {
+      "name": "ipc-handler-registry",
+      "skill_dir": "ipc-handler-registry",
+      "description": "IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications",
+      "adds": [
+        "src/ipc-handlers.ts",
+        "src/ipc-handlers.test.ts",
+        "src/ipc-self-heal.ts",
+        "src/ipc-self-heal.test.ts",
+        "container/skills/self-heal/SKILL.md"
+      ],
+      "modifies": ["src/ipc.ts"],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx vitest run src/ipc-handlers.test.ts src/ipc-self-heal.test.ts",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "container-hardening",
+      "skill_dir": "add-container-hardening",
+      "description": "Container pipeline robustness: dead-process guards, log rotation, plugins sync",
+      "adds": [],
+      "modifies": [
+        "src/group-queue.ts",
+        "src/container-runner.ts",
+        "container/Dockerfile"
+      ],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx tsc --noEmit",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "task-scheduler-fixes",
+      "skill_dir": "add-task-scheduler-fixes",
+      "description": "Prevent duplicate task execution and improve task result routing",
+      "adds": [],
+      "modifies": ["src/task-scheduler.ts"],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx tsc --noEmit",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "whatsapp-search",
+      "skill_dir": "add-whatsapp-search",
+      "description": "Semantic search over WhatsApp message history using Qdrant and OpenAI embeddings",
+      "adds": [
+        "rag-system/.gitignore",
+        "rag-system/config/rag-config.json",
+        "rag-system/docker/docker-compose.yml",
+        "rag-system/package.json",
+        "rag-system/package-lock.json",
+        "rag-system/tsconfig.json",
+        "rag-system/src/config.ts",
+        "rag-system/src/database/qdrant-client.ts",
+        "rag-system/src/embeddings.ts",
+        "rag-system/src/ingestion.ts",
+        "rag-system/src/server.ts",
+        "container/skills/whatsapp-search/SKILL.md"
+      ],
+      "modifies": ["src/container-runner.ts"],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx tsc --noEmit",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "perplexity-research",
+      "skill_dir": "add-perplexity-research",
+      "description": "Web research via Perplexity Pro API (sonar, sonar-pro, sonar-deep-research)",
+      "adds": [
+        "container/skills/perplexity-research/SKILL.md",
+        "container/skills/perplexity-research/perplexity"
+      ],
+      "modifies": ["src/container-runner.ts", "container/Dockerfile"],
+      "npm_dependencies": {},
+      "env_vars": ["PERPLEXITY_API_KEY"],
+      "depends": [],
+      "test": "npx tsc --noEmit",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "feature-request",
+      "skill_dir": "add-feature-request",
+      "description": "Container agent can write feature request PRDs for the host to review",
+      "adds": ["container/skills/feature-request/SKILL.md"],
+      "modifies": [],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx tsc --noEmit",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "whatsapp-summary",
+      "skill_dir": "add-whatsapp-summary",
+      "description": "3-stage WhatsApp group summary pipeline",
+      "adds": ["container/skills/whatsapp-summary/SKILL.md"],
+      "modifies": [],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": [],
+      "test": "npx tsc --noEmit",
+      "tier": 1,
+      "branch_from": "main",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "group-lifecycle",
+      "skill_dir": "add-group-lifecycle",
+      "description": "Group unregistration via IPC for dynamic group management",
+      "adds": ["src/ipc-handlers/group-lifecycle.ts"],
+      "modifies": ["src/db.ts", "src/index.ts", "src/ipc.ts"],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": ["ipc-handler-registry", "lifecycle-hooks"],
+      "test": "npx tsc --noEmit",
+      "tier": 2,
+      "branch_from": "skill/lifecycle-hooks",
+      "merge_parents": ["skill/ipc-handler-registry"],
+      "extra_dirs": []
+    },
+    {
+      "name": "google-home",
+      "skill_dir": "add-google-home",
+      "description": "Smart home control via Google Assistant with Unix socket bridge",
+      "adds": [
+        "src/google-assistant.ts",
+        "src/ipc-handlers/google-home.ts",
+        "scripts/google-assistant-daemon.py",
+        "scripts/google-assistant-setup.py",
+        "container/skills/google-home/SKILL.md",
+        "container/skills/google-home/google-home",
+        "container/.dockerignore"
+      ],
+      "modifies": [
+        "src/index.ts",
+        "src/container-runner.ts",
+        "container/Dockerfile"
+      ],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": ["ipc-handler-registry", "lifecycle-hooks"],
+      "test": "npx tsc --noEmit",
+      "tier": 2,
+      "branch_from": "skill/lifecycle-hooks",
+      "merge_parents": ["skill/ipc-handler-registry"],
+      "extra_dirs": []
+    },
+    {
+      "name": "shabbat-mode",
+      "skill_dir": "add-shabbat-mode",
+      "description": "Pause all activity during Shabbat and Yom Tov",
+      "adds": [
+        "src/shabbat.ts",
+        "src/shabbat.test.ts",
+        "scripts/generate-zmanim.ts"
+      ],
+      "modifies": ["src/index.ts", "src/task-scheduler.ts", "src/ipc.ts"],
+      "npm_dependencies": {
+        "@hebcal/core": "^6.0.8"
+      },
+      "env_vars": [],
+      "depends": ["lifecycle-hooks"],
+      "test": "npx vitest run src/shabbat.test.ts",
+      "tier": 2,
+      "branch_from": "skill/lifecycle-hooks",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "akiflow-sync",
+      "skill_dir": "add-akiflow-sync",
+      "description": "Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local DB, and conflict resolution",
+      "adds": [
+        "container/skills/akiflow/SKILL.md",
+        "container/skills/akiflow/akiflow-functions.sh",
+        "container/skills/akiflow/akiflow"
+      ],
+      "modifies": ["src/container-runner.ts", "container/Dockerfile"],
+      "npm_dependencies": {},
+      "env_vars": ["AKIFLOW_REFRESH_TOKEN", "AKIFLOW_DB_PATH"],
+      "depends": ["container-hardening"],
+      "test": "cd akiflow-sync && npm test",
+      "tier": 2,
+      "branch_from": "skill/container-hardening",
+      "merge_parents": [],
+      "extra_dirs": ["akiflow-sync/"]
+    },
+    {
+      "name": "reactions",
+      "skill_dir": "add-reactions",
+      "description": "WhatsApp emoji reaction support with status tracking",
+      "adds": [
+        "scripts/migrate-reactions.ts",
+        "container/skills/reactions/SKILL.md",
+        "src/status-tracker.ts",
+        "src/status-tracker.test.ts"
+      ],
+      "modifies": [
+        "src/db.ts",
+        "src/db.test.ts",
+        "src/channels/whatsapp.ts",
+        "src/types.ts",
+        "src/ipc.ts",
+        "src/index.ts",
+        "container/agent-runner/src/ipc-mcp-stdio.ts",
+        "src/channels/whatsapp.test.ts",
+        "src/group-queue.test.ts",
+        "src/ipc-auth.test.ts"
+      ],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": ["whatsapp"],
+      "test": "npx tsc --noEmit",
+      "tier": 3,
+      "branch_from": "skill/whatsapp",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "whatsapp-replies",
+      "skill_dir": "whatsapp-replies",
+      "description": "See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context",
+      "adds": ["container/skills/whatsapp-replies/SKILL.md"],
+      "modifies": [
+        "container/agent-runner/src/ipc-mcp-stdio.ts",
+        "rag-system/src/ingestion.ts",
+        "src/channels/whatsapp.test.ts",
+        "src/channels/whatsapp.ts",
+        "src/db.test.ts",
+        "src/db.ts",
+        "src/formatting.test.ts",
+        "src/index.ts",
+        "src/ipc.ts",
+        "src/router.ts",
+        "src/types.ts"
+      ],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": ["whatsapp", "whatsapp-search"],
+      "test": "npx tsc --noEmit",
+      "tier": 3,
+      "branch_from": "skill/whatsapp",
+      "merge_parents": ["skill/whatsapp-search"],
+      "extra_dirs": []
+    },
+    {
+      "name": "voice-transcription-elevenlabs",
+      "skill_dir": "add-voice-transcription-elevenlabs",
+      "description": "Voice message transcription via ElevenLabs Scribe v2",
+      "adds": ["src/transcription.ts"],
+      "modifies": [
+        "src/channels/whatsapp.ts",
+        "src/channels/whatsapp.test.ts"
+      ],
+      "npm_dependencies": {
+        "@elevenlabs/elevenlabs-js": "^2.36.0"
+      },
+      "env_vars": ["ELEVENLABS_API_KEY"],
+      "depends": ["reactions"],
+      "test": "npx vitest run src/channels/whatsapp.test.ts",
+      "tier": 4,
+      "branch_from": "skill/reactions",
+      "merge_parents": [],
+      "extra_dirs": []
+    },
+    {
+      "name": "voice-recognition",
+      "skill_dir": "add-voice-recognition",
+      "description": "Speaker recognition using PyAnnote voice embeddings",
+      "adds": [
+        "src/voice-recognition.ts",
+        "scripts/voice-recognition-service.py",
+        "scripts/enroll-voice.ts"
+      ],
+      "modifies": ["src/config.ts", "src/transcription.ts"],
+      "npm_dependencies": {},
+      "env_vars": [],
+      "depends": ["voice-transcription-elevenlabs"],
+      "test": "npx tsc --noEmit && npx vitest run src/channels/whatsapp.test.ts",
+      "tier": 5,
+      "branch_from": "skill/voice-transcription-elevenlabs",
+      "merge_parents": [],
+      "extra_dirs": []
+    }
+  ]
+}
