@@ -364,11 +364,6 @@ export class GroupQueue {
     }
   }
 
-  isActive(groupJid: string): boolean {
-    const state = this.groups.get(groupJid);
-    return state?.active === true;
-  }
-
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
