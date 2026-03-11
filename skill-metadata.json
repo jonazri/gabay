@@ -1,9 +1,9 @@
 {
-  "name": "ipc-handler-registry",
-  "description": "IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications",
+  "name": "google-home",
+  "description": "Smart home control via Google Assistant with Unix socket bridge",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": [],
+  "depends": ["lifecycle-hooks", "ipc-handler-registry"],
   "env": [],
-  "tags": ["ipc", "infrastructure", "self-heal"]
+  "tags": ["smart-home", "google", "assistant"]
 }
