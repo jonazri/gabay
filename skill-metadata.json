@@ -1,0 +1,9 @@
+{
+  "name": "whatsapp-search",
+  "description": "Semantic search over WhatsApp message history using Qdrant and OpenAI embeddings",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["search", "rag", "whatsapp", "qdrant"]
+}
