@@ -1,0 +1,9 @@
+{
+  "name": "whatsapp-summary",
+  "description": "3-stage WhatsApp group summary pipeline",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["whatsapp", "summary", "pipeline"]
+}
