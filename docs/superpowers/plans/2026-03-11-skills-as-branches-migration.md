@@ -50,6 +50,7 @@ Read each manifest and produce a single JSON file at `docs/migration/skill-inven
   "skills": [
     {
       "name": "lifecycle-hooks",
+      "skill_dir": "add-lifecycle-hooks",
       "adds": ["src/lifecycle.ts", "src/lifecycle.test.ts", "src/cursor-manager.ts", "src/cursor-manager.test.ts", "src/message-events.ts", "src/message-events.test.ts"],
       "modifies": ["src/index.ts"],
       "npm_dependencies": {},
@@ -90,6 +91,11 @@ Include all 18 skills with the following tier/branch assignments:
 **Note:** whatsapp-types is NOT a separate branch — its content (the `src/qrcode-terminal.d.ts` file and npm deps `@whiskeysockets/baileys`, `qrcode-terminal`) is included in the whatsapp branch.
 
 **Note:** akiflow-sync also has a top-level `akiflow-sync/` directory (with its own `package.json`) that is NOT listed in its manifest but belongs to the skill. Include it in the skill branch.
+
+**`skill_dir` mapping:** Most skills use `add-<name>` as their directory under `.claude/skills/`. Exceptions:
+- `ipc-handler-registry` → `.claude/skills/ipc-handler-registry/`
+- `whatsapp-replies` → `.claude/skills/whatsapp-replies/`
+- `whatsapp` → `.claude/skills/add-whatsapp/` (plus files from `.claude/skills/add-whatsapp-types/` for the folded whatsapp-types content)
 
 - [ ] **Step 4: Commit the inventory**
 
@@ -165,21 +171,25 @@ Record the list of conflicted files.
 git merge upstream/main --no-edit
 ```
 
+**Expected:** Exits non-zero due to conflicts. This is normal — proceed to Step 4 to resolve them.
+
 - [ ] **Step 4: Resolve conflicts by category**
 
 For each conflicted file, resolve per the spec's conflict resolution table:
 
 | Pattern | Action |
 |---------|--------|
-| `.claude/skills/*/modify/`, `add/`, `tests/`, `manifest.yaml` | `git checkout --theirs <file>` (accept deletion) |
-| `skills-engine/*` | `git checkout --theirs <file>` (accept deletion) |
-| `scripts/apply-skill.ts`, `scripts/uninstall-skill.ts` | `git checkout --theirs <file>` (accept deletion) |
-| `.github/workflows/skill-drift.yml`, `skill-pr.yml` | `git checkout --theirs <file>` (accept deletion) |
-| `.claude/skills/add-compact/SKILL.md`, `add-reactions/SKILL.md` | `git checkout --theirs <file>` (take upstream) |
+| `.claude/skills/*/modify/`, `add/`, `tests/`, `manifest.yaml` | `git rm <file>` (accept upstream deletion — these are modify/delete conflicts) |
+| `skills-engine/*` | `git rm <file>` (accept upstream deletion) |
+| `scripts/apply-skill.ts`, `scripts/uninstall-skill.ts` | `git rm <file>` (accept upstream deletion) |
+| `.github/workflows/skill-drift.yml`, `skill-pr.yml` | `git rm <file>` (accept upstream deletion) |
+| `.claude/skills/add-compact/SKILL.md`, `add-reactions/SKILL.md` | `git checkout --theirs <file>` (take upstream version) |
 | `package.json` | Manual merge: keep upstream scripts, strip skill-specific deps |
 | `package-lock.json` | Delete, regenerate via `npm install` after package.json resolved |
 | `setup/register.ts` | Manual merge: adopt upstream's refactored structure |
-| `repo-tokens/badge.svg` | `git checkout --theirs <file>` (take upstream) |
+| `repo-tokens/badge.svg` | `git checkout --theirs <file>` (take upstream version) |
+
+**Note:** For modify/delete conflicts (first 4 rows), `git checkout --theirs` will fail because the file doesn't exist on upstream's side. Use `git rm` instead.
 
 After resolving all conflicts (including deleting and regenerating `package-lock.json` via `npm install`):
 
@@ -199,7 +209,7 @@ git commit --no-edit  # completes the merge commit
 npm run build
 ```
 
-Expected: TypeScript compilation succeeds (exit 0). Note: `build` still runs apply-skills at this point — that's fine, the old engine still works. After Phase 5 cleanup, build will be simplified.
+Expected: TypeScript compilation succeeds (exit 0). Note: if upstream removed the overlay engine but the `build` script still references `apply-skills`, temporarily change the `build` script to just `tsc` for this validation step.
 
 - [ ] **Step 2: Run tests**
 
