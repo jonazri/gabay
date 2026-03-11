@@ -1,17 +1,16 @@
-# Reactions
-WhatsApp emoji reaction support with status tracking.
+# Voice Transcription (ElevenLabs)
+Voice message transcription via ElevenLabs Scribe v2.
 
 ## Prerequisites
-- skill/whatsapp
+- skill/reactions
 
 ## Installation
-1. `git fetch origin skill/reactions`
-2. `git merge origin/skill/reactions`
+1. `git fetch origin skill/voice-transcription-elevenlabs`
+2. `git merge origin/skill/voice-transcription-elevenlabs`
 3. `npm install`
-4. Run `npx tsx scripts/migrate-reactions.ts` to add reaction columns to existing DB
 
 ## Verification
 - `npm run build && npm test`
 
 ## Environment Variables
-None
+- `ELEVENLABS_API_KEY` — ElevenLabs API key for voice transcription

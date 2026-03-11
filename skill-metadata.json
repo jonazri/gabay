@@ -1,9 +1,9 @@
 {
-  "name": "reactions",
-  "description": "WhatsApp emoji reaction support with status tracking",
+  "name": "voice-transcription-elevenlabs",
+  "description": "Voice message transcription via ElevenLabs Scribe v2",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": ["whatsapp"],
-  "env": [],
-  "tags": ["whatsapp", "reactions", "emoji"]
+  "depends": ["reactions"],
+  "env": ["ELEVENLABS_API_KEY"],
+  "tags": ["voice", "transcription", "elevenlabs"]
 }
