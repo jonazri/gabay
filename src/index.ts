@@ -270,7 +270,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Track received messages for emoji status reactions
   for (const msg of missedMessages) {
-    statusTracker?.markReceived(msg.id, chatJid, msg.is_from_me === true);
+    const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+    statusTracker?.markReceived(msg.id, chatJid, fromMe);
   }
 
   // Track idle timer for closing stdin when agent is idle
@@ -754,7 +755,11 @@ async function main(): Promise<void> {
   if (userJid) {
     startCandleLightingNotifier((text) => {
       const channel = findChannel(channels, userJid);
-      if (channel) channel.sendMessage(userJid, text);
+      if (channel) {
+        channel.sendMessage(userJid, text).catch((err) =>
+          logger.error({ err }, 'Failed to send candle lighting notification'),
+        );
+      }
     });
   } else {
     logger.warn('No main group registered — candle lighting notifier disabled');
