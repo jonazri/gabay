@@ -57,6 +57,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { StatusTracker } from './status-tracker.js';
 import {
   Channel,
   NewMessage,
@@ -76,6 +77,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker | null = null;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -198,6 +200,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
+  // Track received messages for emoji status reactions
+  for (const msg of missedMessages) {
+    statusTracker?.markReceived(msg.id, chatJid, msg.is_from_me === true);
+  }
+
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -236,6 +243,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+      statusTracker?.markAllDone(chatJid);
     }
 
     if (result.status === 'error') {
@@ -250,12 +258,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
+      statusTracker?.markAllDone(chatJid);
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
       return true;
     }
+    statusTracker?.markAllFailed(chatJid, 'Agent error — retrying.');
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
@@ -266,6 +276,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  statusTracker?.markAllDone(chatJid);
   return true;
 }
 
@@ -490,6 +501,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    await statusTracker?.shutdown();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -548,6 +560,23 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Initialize status tracker for emoji reactions
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+  await statusTracker.recover();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
