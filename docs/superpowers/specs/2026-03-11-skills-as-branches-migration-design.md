@@ -305,6 +305,8 @@ git merge skill/voice-recognition
 
 Git handles composition. Conflicts (if any) are resolved interactively.
 
+**Same-file stacking:** Multiple independent skills modify the same core files (e.g., `src/task-scheduler.ts` is modified by both task-scheduler-fixes in Tier 1 and shabbat-mode in Tier 2; `src/index.ts` is modified by 6+ skills across tiers). In the patch-queue model, order determined the merge base for each overlay. In the branch model, each skill modifies files independently from its parent branch; git merge handles composition. Non-overlapping changes auto-merge regardless of order. Overlapping changes produce conflicts resolved during this phase. Compare the final composed result against the Phase 1 archive to verify behavioral equivalence.
+
 ### Phase 5: Cleanup & Validation
 
 **Remove old infrastructure:**
@@ -382,6 +384,7 @@ Skill branches (once pushed) survive a main reset, so Phase 3 work is never lost
 | Skills-engine removal breaks build | Phase 5 cleanup only after Phase 4 validation |
 | Multi-parent skill branches create merge diamonds | Branch from primary parent, merge secondary; test before committing |
 | Non-installed skill overlay files left behind | Explicit cleanup step in Phase 5 |
+| Same-file stacking across tiers changes merge order | Git merge is order-independent for non-overlapping changes; overlapping changes produce conflicts resolved in Phase 4; compare final result against Phase 1 archive |
 
 ## Success Criteria
 
