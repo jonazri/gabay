@@ -32,6 +32,9 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      replied_to_id TEXT,
+      replied_to_sender TEXT,
+      replied_to_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -104,6 +107,15 @@ function createSchema(database: Database.Database): void {
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
+  }
+
+  // Add replied_to columns for message reply tracking
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_id TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_sender TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN replied_to_content TEXT`);
+  } catch {
+    /* columns already exist */
   }
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
@@ -262,7 +274,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -272,6 +284,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.replied_to_id ?? null,
+    msg.replied_to_sender ?? null,
+    msg.replied_to_content ?? null,
   );
 }
 
@@ -287,9 +302,12 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
+  replied_to_id?: string;
+  replied_to_sender?: string;
+  replied_to_content?: string;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -299,6 +317,9 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.replied_to_id ?? null,
+    msg.replied_to_sender ?? null,
+    msg.replied_to_content ?? null,
   );
 }
 
@@ -316,7 +337,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, replied_to_id, replied_to_sender, replied_to_content
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -349,7 +370,7 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, replied_to_id, replied_to_sender, replied_to_content
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -694,4 +715,17 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Reply context helpers ---
+
+export function getMessageById(
+  messageId: string,
+  chatJid: string,
+): NewMessage | undefined {
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, replied_to_id, replied_to_sender, replied_to_content FROM messages WHERE id = ? AND chat_jid = ?`,
+    )
+    .get(messageId, chatJid) as NewMessage | undefined;
 }

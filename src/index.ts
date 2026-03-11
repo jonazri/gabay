@@ -33,6 +33,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getMessageById,
   getRegisteredGroup,
   getRouterState,
   initDatabase,
@@ -53,7 +54,12 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  NewMessage,
+  QuotedMessageKey,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -571,6 +577,19 @@ async function main(): Promise<void> {
           .filter((ch) => ch.syncGroups)
           .map((ch) => ch.syncGroups!(force)),
       );
+    },
+    sendMessageWithQuote: (jid, text, quotedMessageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      const quotedMsg = getMessageById(quotedMessageId, jid);
+      const quotedKey: QuotedMessageKey = {
+        id: quotedMessageId,
+        remoteJid: jid,
+        fromMe: quotedMsg?.is_from_me ?? false,
+        participant: quotedMsg?.sender,
+        content: quotedMsg?.content,
+      };
+      return channel.sendMessage(jid, text, quotedKey);
     },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>

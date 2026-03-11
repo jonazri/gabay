@@ -44,6 +44,7 @@ agents-sdk-docs
 container/skills/*
 !container/skills/agent-browser/
 !container/skills/whatsapp-search/
+!container/skills/whatsapp-replies/
 container/.dockerignore
 scripts/enroll-voice.ts
 scripts/generate-zmanim.ts

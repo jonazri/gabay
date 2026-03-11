@@ -23,9 +23,32 @@ import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
+  QuotedMessageKey,
   RegisteredGroup,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+
+/**
+ * Extract text content from a Baileys quoted message proto.
+ */
+function extractQuotedText(
+  quotedMessage: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!quotedMessage) return undefined;
+  const q = quotedMessage as {
+    conversation?: string;
+    extendedTextMessage?: { text?: string };
+    imageMessage?: { caption?: string };
+    videoMessage?: { caption?: string };
+  };
+  return (
+    q.conversation ||
+    q.extendedTextMessage?.text ||
+    q.imageMessage?.caption ||
+    q.videoMessage?.caption ||
+    undefined
+  );
+}
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -41,7 +64,11 @@ export class WhatsAppChannel implements Channel {
   private sock!: WASocket;
   private connected = false;
   private lidToPhoneMap: Record<string, string> = {};
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<{
+    jid: string;
+    text: string;
+    quotedKey?: QuotedMessageKey;
+  }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
 
@@ -216,6 +243,21 @@ export class WhatsAppChannel implements Channel {
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
 
+            // Extract reply/quote context if present
+            const contextInfo =
+              msg.message?.extendedTextMessage?.contextInfo ||
+              msg.message?.imageMessage?.contextInfo ||
+              msg.message?.videoMessage?.contextInfo ||
+              null;
+            const repliedToId = contextInfo?.stanzaId || undefined;
+            const repliedToSender = contextInfo?.participant || undefined;
+            const repliedToContent = extractQuotedText(
+              contextInfo?.quotedMessage as
+                | Record<string, unknown>
+                | null
+                | undefined,
+            );
+
             const fromMe = msg.key.fromMe || false;
             // Detect bot messages: with own number, fromMe is reliable
             // since only the bot sends from that number.
@@ -234,6 +276,9 @@ export class WhatsAppChannel implements Channel {
               timestamp,
               is_from_me: fromMe,
               is_bot_message: isBotMessage,
+              replied_to_id: repliedToId,
+              replied_to_sender: repliedToSender,
+              replied_to_content: repliedToContent,
             });
           }
         } catch (err) {
@@ -246,7 +291,11 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    quotedKey?: QuotedMessageKey,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
@@ -256,7 +305,7 @@ export class WhatsAppChannel implements Channel {
       : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ jid, text: prefixed, quotedKey });
       logger.info(
         { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
         'WA disconnected, message queued',
@@ -264,11 +313,29 @@ export class WhatsAppChannel implements Channel {
       return;
     }
     try {
-      await this.sock.sendMessage(jid, { text: prefixed });
+      if (quotedKey) {
+        await this.sock.sendMessage(
+          jid,
+          { text: prefixed },
+          {
+            quoted: {
+              key: {
+                id: quotedKey.id,
+                remoteJid: quotedKey.remoteJid,
+                fromMe: quotedKey.fromMe,
+                participant: quotedKey.participant,
+              },
+              message: { conversation: quotedKey.content || '' },
+            },
+          },
+        );
+      } else {
+        await this.sock.sendMessage(jid, { text: prefixed });
+      }
       logger.info({ jid, length: prefixed.length }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ jid, text: prefixed, quotedKey });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
@@ -383,7 +450,25 @@ export class WhatsAppChannel implements Channel {
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
+        if (item.quotedKey) {
+          await this.sock.sendMessage(
+            item.jid,
+            { text: item.text },
+            {
+              quoted: {
+                key: {
+                  id: item.quotedKey.id,
+                  remoteJid: item.quotedKey.remoteJid,
+                  fromMe: item.quotedKey.fromMe,
+                  participant: item.quotedKey.participant,
+                },
+                message: { conversation: item.quotedKey.content || '' },
+              },
+            },
+          );
+        } else {
+          await this.sock.sendMessage(item.jid, { text: item.text });
+        }
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued message sent',

@@ -1,9 +1,9 @@
 {
-  "name": "whatsapp-search",
-  "description": "Semantic search over WhatsApp message history using Qdrant and OpenAI embeddings",
+  "name": "whatsapp-replies",
+  "description": "See reply/quote context on inbound messages; send threaded replies via send_message MCP tool; persists and RAG-indexes reply context",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": [],
+  "depends": ["whatsapp", "whatsapp-search"],
   "env": [],
-  "tags": ["search", "rag", "whatsapp", "qdrant"]
+  "tags": ["whatsapp", "replies", "threading", "rag"]
 }

@@ -24,6 +24,9 @@ interface RawMessage {
   content: string;
   timestamp: string;
   group_name: string | null;
+  replied_to_id: string | null;
+  replied_to_sender: string | null;
+  replied_to_content: string | null;
 }
 
 function readWatermark(): WatermarkData | null {
@@ -62,7 +65,8 @@ function fetchMessages(
     .prepare(
       `
       SELECT m.id, m.chat_jid, m.sender, m.sender_name, m.content, m.timestamp,
-             c.name AS group_name
+             c.name AS group_name,
+             m.replied_to_id, m.replied_to_sender, m.replied_to_content
       FROM messages m
       LEFT JOIN chats c ON m.chat_jid = c.jid
       WHERE m.timestamp > ?
@@ -98,6 +102,9 @@ async function processBatch(messages: RawMessage[]): Promise<number> {
       content: m.content,
       timestamp: m.timestamp,
       group_name: m.group_name || undefined,
+      replied_to_id: m.replied_to_id || undefined,
+      replied_to_sender: m.replied_to_sender || undefined,
+      replied_to_content: m.replied_to_content || undefined,
     },
   }));
 
