@@ -29,13 +29,15 @@ Our fork has 18 installed skills using the old patch-queue model, but `whatsapp-
 ### Before (Patch-Queue)
 
 ```
-main branch:
-  .nanoclaw/installed-skills.yaml    # Skill install order
-  .nanoclaw/base/                    # Clean upstream snapshot
-  .nanoclaw/state.json               # Applied skill state + hashes
+main branch (git-tracked):
+  .nanoclaw/installed-skills.yaml    # Skill install order (only .nanoclaw file in git)
   .claude/skills/add-*/              # Overlay files (add/, modify/, manifest.yaml)
   skills-engine/                     # Three-way merge engine
   src/                               # Upstream-clean at rest, skills applied at build time
+
+local working tree (generated, gitignored):
+  .nanoclaw/base/                    # Clean upstream snapshot
+  .nanoclaw/state.yaml               # Applied skill state + hashes
 ```
 
 Build: `npm run apply-skills` → three-way merge overlays onto src/ → compile → restore src/
@@ -53,8 +55,8 @@ skill/reactions branch:              # Fork-specific skill
 ... (17 branches total)
 ```
 
-Install: `git merge skill/whatsapp` → standard git merge → done.
-Update: `git merge upstream/main` → then merge-forward skill branches.
+Install: `git merge skill/whatsapp` → resolve conflicts (including `package.json`/`package-lock.json`) → `npm install` → done.
+Update: `git merge upstream/main` → merge-forward skill branches → `npm install`.
 
 ### Dependency Model
 
@@ -160,14 +162,14 @@ For each of the 17 skill branches, a review agent:
    - Dependent skills: branch from their parent skill's branch
 
 2. **Reads old overlay files** from the backup tag (`pre-update-75032fd-20260311-103448`):
-   - `manifest.yaml` for file inventory
-   - `add/` files for new code
-   - `modify/` files for delta overlays
+   - `manifest.yaml` for file inventory — **only files listed in the manifest are applied by the current engine**; extra files in `add/`/`modify/` directories that aren't in the manifest should be ignored unless they're clearly part of the skill (e.g., unlisted top-level directories)
+   - `add/` files listed in `manifest.adds`
+   - `modify/` files listed in `manifest.modifies`
    - `tests/` for skill-specific tests
 
 3. **Applies changes** to the new upstream src/:
-   - For `add/` files: copy directly (these are new files, no conflict possible)
-   - For `modify/` overlays: understand the intent, apply equivalent changes to new upstream src/
+   - For manifest-listed `add/` files: copy directly (these are new files, no conflict possible)
+   - For manifest-listed `modify/` overlays: understand the intent, apply equivalent changes to new upstream src/
    - For `package.json`: add skill-specific dependencies
    - For `.env.example`: add skill-specific env vars
    - For directories not in manifest but belonging to the skill (e.g., `akiflow-sync/` top-level dir with its own package.json — not in akiflow-sync manifest but clearly part of the skill): include them in the skill branch
@@ -263,13 +265,13 @@ Git handles composition. Conflicts (if any) are resolved interactively.
 ### Phase 5: Cleanup & Validation
 
 **Remove old infrastructure:**
-- Delete `.nanoclaw/` directory (installed-skills.yaml, base/, state.json)
+- Delete `.nanoclaw/installed-skills.yaml` from git; delete generated state (`state.yaml`, `base/`) from working tree (`.nanoclaw/` is gitignored except `installed-skills.yaml`)
 - Delete `skills-engine/` directory (entire engine, if not already removed by upstream merge)
-- Delete old overlay files from `.claude/skills/*/` (keep only SKILL.md files)
+- Delete overlay-specific artifacts from `.claude/skills/*/`: `add/`, `modify/`, `tests/`, `manifest.yaml`. Keep non-overlay code/assets (e.g., `x-integration/` has `agent.ts`, `host.ts`, `lib/`, `scripts/` that are not overlays)
 - Remove old npm scripts from package.json (apply-skills, clean-skills, package-skill, build:quick)
 - Update `dev` script — currently runs apply-skills; should become `tsx watch src/index.ts` or equivalent
 
-**Non-installed skill overlay files:** The repo has ~27 skill directories in `.claude/skills/`, but only 18 are installed. Non-installed skills with overlay files to remove during cleanup: add-discord, add-gmail, add-image-vision, add-ollama-tool, add-pdf-reader, add-slack, add-telegram, add-compact, add-voice-transcription (original, pre-elevenlabs), convert-to-apple-container, use-local-whisper, add-whatsapp-resilience, add-regular-high-watcher, add-telegram-swarm, add-parallel. These should be removed during cleanup — they're replaced by upstream's SKILL.md-only versions or can be installed from upstream skill branches/channel forks later.
+**Non-installed skill overlay files:** `.claude/skills/` contains 41 directories total (including operational skills like `setup/`, `debug/`, `x-integration/` that have no overlays). Non-installed skills with overlay artifacts (`add/`, `modify/`, `manifest.yaml`) to clean up: add-discord, add-gmail, add-image-vision, add-ollama-tool, add-pdf-reader, add-slack, add-telegram, add-compact, add-voice-transcription (original, pre-elevenlabs), convert-to-apple-container, use-local-whisper, add-whatsapp-resilience, add-regular-high-watcher, add-telegram-swarm, add-parallel. Remove their overlay artifacts during cleanup — they're replaced by upstream's SKILL.md-only versions or can be installed from upstream skill branches/channel forks later. Operational skill directories (SKILL.md-only, no overlays) are kept as-is.
 
 **Skill directory naming:** Some skill directories don't follow the `add-` prefix convention (e.g., `ipc-handler-registry/`, `whatsapp-replies/`). The new skill branch names (`skill/<name>`) don't need prefixes, so this is a non-issue post-migration.
 
