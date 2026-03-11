@@ -1,17 +1,17 @@
-# WhatsApp
-WhatsApp channel via Baileys (Multi-Device Web API).
+# Reactions
+WhatsApp emoji reaction support with status tracking.
 
 ## Prerequisites
-None (base channel)
+- skill/whatsapp
 
 ## Installation
-1. `git fetch origin skill/whatsapp`
-2. `git merge origin/skill/whatsapp`
+1. `git fetch origin skill/reactions`
+2. `git merge origin/skill/reactions`
 3. `npm install`
-4. Run `npm run auth` to authenticate with WhatsApp
+4. Run `npx tsx scripts/migrate-reactions.ts` to add reaction columns to existing DB
 
 ## Verification
 - `npm run build && npm test`
 
 ## Environment Variables
-- `ASSISTANT_HAS_OWN_NUMBER` — Set to "true" if the assistant has its own dedicated WhatsApp number
+None
