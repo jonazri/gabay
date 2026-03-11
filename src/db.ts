@@ -598,6 +598,13 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
+export function deleteRegisteredGroup(jid: string): boolean {
+  const result = db
+    .prepare('DELETE FROM registered_groups WHERE jid = ?')
+    .run(jid);
+  return result.changes > 0;
+}
+
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
     jid: string;
@@ -685,6 +692,10 @@ function migrateJsonState(): void {
   if (groups) {
     for (const [jid, group] of Object.entries(groups)) {
       try {
+        // Preserve main group flag during JSON→SQLite migration
+        if (group.folder === 'main' && !group.isMain) {
+          group.isMain = true;
+        }
         setRegisteredGroup(jid, group);
       } catch (err) {
         logger.warn(

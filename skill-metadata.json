@@ -1,9 +1,9 @@
 {
-  "name": "whatsapp-summary",
-  "description": "3-stage WhatsApp group summary pipeline",
+  "name": "group-lifecycle",
+  "description": "Group unregistration via IPC for dynamic group management",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": [],
+  "depends": ["lifecycle-hooks", "ipc-handler-registry"],
   "env": [],
-  "tags": ["whatsapp", "summary", "pipeline"]
+  "tags": ["groups", "lifecycle", "ipc"]
 }
