@@ -1,0 +1,9 @@
+{
+  "name": "lifecycle-hooks",
+  "description": "Lifecycle hook registry for startup, shutdown, channels-ready, and processing guards",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": [],
+  "tags": ["lifecycle", "hooks", "infrastructure"]
+}
