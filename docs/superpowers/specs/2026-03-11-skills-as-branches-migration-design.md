@@ -264,13 +264,18 @@ Within each tier, process in `installed-skills.yaml` order to minimize unexpecte
 Before composing, validate each skill branch independently:
 
 ```bash
+failures=()
 git branch --format='%(refname:short)' --list 'skill/*' | while read -r branch; do
   git checkout "$branch"
-  npm run build && npm test
+  npm install && npm run build && npm test || failures+=("$branch")
 done
+if [ ${#failures[@]} -gt 0 ]; then
+  echo "FAILED branches: ${failures[*]}"
+  exit 1
+fi
 ```
 
-This catches issues in isolation before they compound during the merge sequence.
+This catches issues in isolation before they compound during the merge sequence. Each branch gets a fresh `npm install` since skill branches modify `package.json` with different dependencies.
 
 ### Phase 4: Compose by Merging Skill Branches
 
