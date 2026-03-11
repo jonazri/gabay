@@ -1,9 +1,9 @@
 {
-  "name": "feature-request",
-  "description": "Container agent can write feature request PRDs for the host to review",
+  "name": "whatsapp-summary",
+  "description": "3-stage WhatsApp group summary pipeline",
   "version": "1.0.0",
   "author": "jonazri",
   "depends": [],
   "env": [],
-  "tags": ["feature-request", "agent", "prd"]
+  "tags": ["whatsapp", "summary", "pipeline"]
 }

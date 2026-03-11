@@ -45,6 +45,7 @@ container/skills/*
 !container/skills/agent-browser/
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 !container/skills/whatsapp-search/
 =======
 !container/skills/perplexity-research/
@@ -52,6 +53,9 @@ container/skills/*
 =======
 !container/skills/feature-request/
 >>>>>>> origin/skill/feature-request
+=======
+!container/skills/whatsapp-summary/
+>>>>>>> origin/skill/whatsapp-summary
 container/.dockerignore
 scripts/enroll-voice.ts
 scripts/generate-zmanim.ts

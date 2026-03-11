@@ -1,12 +1,12 @@
-# Feature Request
-Container agent can write feature request PRDs for the host to review.
+# WhatsApp Summary
+3-stage WhatsApp group summary pipeline.
 
 ## Prerequisites
 None
 
 ## Installation
-1. `git fetch origin skill/feature-request`
-2. `git merge origin/skill/feature-request`
+1. `git fetch origin skill/whatsapp-summary`
+2. `git merge origin/skill/whatsapp-summary`
 3. `npm install`
 
 ## Verification
