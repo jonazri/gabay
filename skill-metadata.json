@@ -1,0 +1,9 @@
+{
+  "name": "perplexity-research",
+  "description": "Web research via Perplexity Pro API (sonar, sonar-pro, sonar-deep-research)",
+  "version": "1.0.0",
+  "author": "jonazri",
+  "depends": [],
+  "env": ["PERPLEXITY_API_KEY"],
+  "tags": ["research", "web", "perplexity"]
+}
