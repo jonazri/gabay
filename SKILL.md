@@ -1,12 +1,12 @@
-# IPC Handler Registry
-IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications.
+# Container Hardening
+Container pipeline robustness: dead-process guards, log rotation, plugins sync.
 
 ## Prerequisites
-None (base infrastructure)
+None (infrastructure improvement)
 
 ## Installation
-1. `git fetch origin skill/ipc-handler-registry`
-2. `git merge origin/skill/ipc-handler-registry`
+1. `git fetch origin skill/container-hardening`
+2. `git merge origin/skill/container-hardening`
 3. `npm install`
 
 ## Verification

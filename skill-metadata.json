@@ -1,9 +1,9 @@
 {
-  "name": "ipc-handler-registry",
-  "description": "IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications",
+  "name": "container-hardening",
+  "description": "Container pipeline robustness: dead-process guards, log rotation, plugins sync",
   "version": "1.0.0",
   "author": "jonazri",
   "depends": [],
   "env": [],
-  "tags": ["ipc", "infrastructure", "self-heal"]
+  "tags": ["container", "infrastructure", "reliability"]
 }
