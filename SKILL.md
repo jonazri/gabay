@@ -1,17 +1,16 @@
-# WhatsApp
-WhatsApp channel via Baileys (Multi-Device Web API).
+# IPC Handler Registry
+IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications.
 
 ## Prerequisites
-None (base channel)
+None (base infrastructure)
 
 ## Installation
-1. `git fetch origin skill/whatsapp`
-2. `git merge origin/skill/whatsapp`
+1. `git fetch origin skill/ipc-handler-registry`
+2. `git merge origin/skill/ipc-handler-registry`
 3. `npm install`
-4. Run `npm run auth` to authenticate with WhatsApp
 
 ## Verification
 - `npm run build && npm test`
 
 ## Environment Variables
-- `ASSISTANT_HAS_OWN_NUMBER` — Set to "true" if the assistant has its own dedicated WhatsApp number
+None
