@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 
 import {
   ASSISTANT_NAME,
@@ -34,9 +35,9 @@ import {
   getMessagesSince,
   getNewMessages,
   getMessageById,
-  getRegisteredGroup,
   getRouterState,
   initDatabase,
+  deleteRegisteredGroup,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -56,7 +57,14 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import {
+  initShabbatSchedule,
+  isShabbatOrYomTov,
+  startCandleLightingNotifier,
+  stopCandleLightingNotifier,
+} from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { StatusTracker } from './status-tracker.js';
 import {
   Channel,
   NewMessage,
@@ -64,6 +72,23 @@ import {
   RegisteredGroup,
 } from './types.js';
 import { logger } from './logger.js';
+import {
+  onGuardLifted,
+  registerProcessingGuard,
+  runChannelsReadyHooks,
+  runShutdownHooks,
+  runStartupHooks,
+  shouldProcessMessages,
+  runGuardLiftedHooks,
+} from './lifecycle.js';
+import { CursorManager } from './cursor-manager.js';
+import {
+  emitAgentStarting,
+  emitAgentOutput,
+  emitAgentSuccess,
+  emitAgentError,
+  emitMessagePiped,
+} from './message-events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -71,20 +96,21 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
+const agentCursors = new CursorManager();
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker | null = null;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+    agentCursors.loadAll(agentTs ? JSON.parse(agentTs) : {});
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
+    agentCursors.loadAll({});
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -96,7 +122,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState('last_agent_timestamp', JSON.stringify(agentCursors.getAll()));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -121,6 +147,46 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+/**
+ * Send a post-Shabbat summary of pending messages across all groups.
+ * Registered as a guard-lifted hook via the lifecycle system.
+ */
+async function sendPostShabbatSummary(): Promise<void> {
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.isMain === true,
+  )?.[0];
+  if (!userJid) return;
+
+  const channel = findChannel(channels, userJid);
+  if (!channel) return;
+
+  const summaryLines: string[] = [];
+  const pendingJids: string[] = [];
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    const sinceTimestamp = agentCursors.get(chatJid);
+    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    if (pending.length > 0) {
+      summaryLines.push(`• ${group.name}: ${pending.length} messages`);
+      pendingJids.push(chatJid);
+    }
+  }
+
+  let text = 'Shavua Tov!';
+  if (summaryLines.length > 0) {
+    text += `\n\nHere's what happened over Shabbat:\n${summaryLines.join('\n')}\n\nCatching up now.`;
+  }
+
+  await channel.sendMessage(userJid, text);
+  logger.info(
+    { groupsWithActivity: summaryLines.length },
+    'Post-Shabbat summary sent',
+  );
+
+  for (const chatJid of pendingJids) {
+    queue.enqueueMessageCheck(chatJid);
+  }
 }
 
 /**
@@ -162,9 +228,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  if (!shouldProcessMessages()) return true;
+
   const isMainGroup = group.isMain === true;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+  const sinceTimestamp = agentCursors.get(chatJid);
   const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
@@ -188,15 +256,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
+  const previousCursor = agentCursors.get(chatJid);
+  agentCursors.advance(
+    chatJid,
+    missedMessages[missedMessages.length - 1].timestamp,
+  );
   saveState();
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
     'Processing messages',
   );
+
+  // Track received messages for emoji status reactions
+  for (const msg of missedMessages) {
+    const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+    statusTracker?.markReceived(msg.id, chatJid, fromMe);
+  }
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -212,11 +288,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  await emitAgentStarting(chatJid, group);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -235,10 +313,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      await emitAgentSuccess(chatJid);
       queue.notifyIdle(chatJid);
+      statusTracker?.markAllDone(chatJid);
     }
 
     if (result.status === 'error') {
+      await emitAgentError(chatJid, result.error || null);
       hadError = true;
     }
   });
@@ -250,14 +331,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
+      statusTracker?.markAllDone(chatJid);
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
       return true;
     }
+    statusTracker?.markAllFailed(chatJid, 'Agent error — retrying.');
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
+    agentCursors.advance(chatJid, previousCursor);
     saveState();
     logger.warn(
       { group: group.name },
@@ -266,6 +349,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  statusTracker?.markAllDone(chatJid);
   return true;
 }
 
@@ -359,7 +443,20 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  let wasGuarded = !shouldProcessMessages();
+
   while (true) {
+    // Lifecycle guard: skip processing when guards are active (e.g. Shabbat mode)
+    if (!shouldProcessMessages()) {
+      wasGuarded = true;
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+      continue;
+    }
+    if (wasGuarded) {
+      await runGuardLiftedHooks();
+      wasGuarded = false;
+    }
+
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
@@ -413,11 +510,11 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
+          // Pull all messages since agentCursors so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
-            lastAgentTimestamp[chatJid] || '',
+            agentCursors.get(chatJid),
             ASSISTANT_NAME,
           );
           const messagesToSend =
@@ -425,12 +522,15 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
+            agentCursors.advance(
+              chatJid,
+              messagesToSend[messagesToSend.length - 1].timestamp,
+            );
             saveState();
             // Show typing indicator while the container processes the piped message
             channel
@@ -457,7 +557,7 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+    const sinceTimestamp = agentCursors.get(chatJid);
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
@@ -479,6 +579,10 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  initShabbatSchedule();
+
+  // Register Shabbat/Yom Tov as a processing guard (returns false to block processing)
+  registerProcessingGuard(() => !isShabbatOrYomTov());
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
@@ -486,12 +590,17 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  await runStartupHooks();
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    stopCandleLightingNotifier();
+    await statusTracker?.shutdown();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    await runShutdownHooks();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -544,10 +653,28 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
+  await runChannelsReadyHooks(channels);
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Initialize status tracker for emoji reactions
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+  await statusTracker.recover();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -574,6 +701,11 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    unregisterGroup: (jid: string) => {
+      const existed = deleteRegisteredGroup(jid);
+      if (existed) delete registeredGroups[jid];
+      return existed;
+    },
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels
@@ -615,6 +747,27 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+
+  // Candle lighting reminders (erev Shabbat and erev Yom Tov)
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.isMain === true,
+  )?.[0];
+  if (userJid) {
+    startCandleLightingNotifier((text) => {
+      const channel = findChannel(channels, userJid);
+      if (channel) {
+        channel.sendMessage(userJid, text).catch((err) =>
+          logger.error({ err }, 'Failed to send candle lighting notification'),
+        );
+      }
+    });
+  } else {
+    logger.warn('No main group registered — candle lighting notifier disabled');
+  }
+
+  // Register post-Shabbat summary hook (runs when guard lifts after Shabbat/Yom Tov)
+  onGuardLifted(sendPostShabbatSummary);
+
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
@@ -623,10 +776,9 @@ async function main(): Promise<void> {
 }
 
 // Guard: only run when executed directly, not when imported by tests
-const isDirectRun =
-  process.argv[1] &&
-  new URL(import.meta.url).pathname ===
-    new URL(`file://${process.argv[1]}`).pathname;
+const thisFile = fileURLToPath(import.meta.url);
+const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const isDirectRun = entryFile != null && thisFile === entryFile;
 
 if (isDirectRun) {
   main().catch((err) => {
