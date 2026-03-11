@@ -8,7 +8,7 @@
 
 Upstream NanoClaw switched to a "skills as branches, channels as forks" architecture. Skills are git branches (`skill/<name>`), installed via `git merge`. The old overlay engine (manifests, three-way merge, `.nanoclaw/` state) was removed from main.
 
-Our fork has 18 installed skills using the old patch-queue model, but `whatsapp-types` is redundant (whatsapp already declares `@types/qrcode-terminal`), so the migration consolidates to **17 skill branches**. All are fork-specific — none have upstream skill branch equivalents. Upstream only has 3 skill branches (apple-container, compact, ollama-tool), and channels (whatsapp, telegram, etc.) are separate repos ("channel forks").
+Our fork has 18 installed skills using the old patch-queue model, but `whatsapp-types` is folded into the whatsapp branch (its npm deps overlap, and its custom `src/qrcode-terminal.d.ts` declaration file is ported to the whatsapp branch), so the migration consolidates to **17 skill branches**. All are fork-specific — none have upstream skill branch equivalents. Upstream only has 3 skill branches (apple-container, compact, ollama-tool), and channels (whatsapp, telegram, etc.) are separate repos ("channel forks").
 
 ## Goals
 
