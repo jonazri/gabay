@@ -1,9 +1,0 @@
-{
-  "name": "voice-recognition",
-  "description": "Speaker recognition using PyAnnote voice embeddings",
-  "version": "1.0.0",
-  "author": "jonazri",
-  "depends": ["voice-transcription-elevenlabs"],
-  "env": [],
-  "tags": ["voice", "recognition", "speaker", "pyannote"]
-}
