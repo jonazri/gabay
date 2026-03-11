@@ -1,9 +1,9 @@
 {
-  "name": "lifecycle-hooks",
-  "description": "Lifecycle hook registry for startup, shutdown, channels-ready, and processing guards",
+  "name": "whatsapp",
+  "description": "WhatsApp channel via Baileys (Multi-Device Web API)",
   "version": "1.0.0",
   "author": "jonazri",
   "depends": [],
-  "env": [],
-  "tags": ["lifecycle", "hooks", "infrastructure"]
+  "env": ["ASSISTANT_HAS_OWN_NUMBER"],
+  "tags": ["channel", "whatsapp", "messaging"]
 }

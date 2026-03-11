@@ -52,7 +52,7 @@ scripts/google-assistant-setup.py
 scripts/migrate-reactions.ts
 scripts/voice-recognition-service.py
 scripts/oauth/
-setup/whatsapp-auth.ts
+
 
 # Runtime database
 nanoclaw.db
