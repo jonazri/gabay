@@ -45,6 +45,10 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
+import {
+  startGoogleAssistantSocket,
+  stopGoogleAssistantSocket,
+} from './google-assistant.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 // Side-effect imports: register custom IPC handlers before dispatch
@@ -274,6 +278,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     statusTracker?.markReceived(msg.id, chatJid, fromMe);
   }
 
+  // Advance user messages to THINKING (👀 → 💭)
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_bot_message && (isMainGroup || !m.is_from_me),
+  );
+  for (const msg of userMessages) {
+    statusTracker?.markThinking(msg.id);
+  }
+
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -292,11 +304,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
+      // Advance user messages to WORKING on first output (💭 → 🔄)
+      if (!firstOutputSeen) {
+        firstOutputSeen = true;
+        for (const um of userMessages) {
+          statusTracker?.markWorking(um.id);
+        }
+      }
       const raw =
         typeof result.result === 'string'
           ? result.result
@@ -597,6 +617,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
     stopCandleLightingNotifier();
+    stopGoogleAssistantSocket();
     await statusTracker?.shutdown();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -675,6 +696,9 @@ async function main(): Promise<void> {
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
   await statusTracker.recover();
+
+  // Start Google Assistant socket server for container CLI access
+  startGoogleAssistantSocket();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
