@@ -8,12 +8,12 @@
 
 Upstream NanoClaw switched to a "skills as branches, channels as forks" architecture. Skills are git branches (`skill/<name>`), installed via `git merge`. The old overlay engine (manifests, three-way merge, `.nanoclaw/` state) was removed from main.
 
-Our fork has 18 installed skills using the old patch-queue model. All 18 are fork-specific — none have upstream skill branch equivalents. Upstream only has 3 skill branches (apple-container, compact, ollama-tool), and channels (whatsapp, telegram, etc.) are separate repos ("channel forks").
+Our fork has 18 installed skills using the old patch-queue model, but `whatsapp-types` is redundant (whatsapp already declares `@types/qrcode-terminal`), so the migration consolidates to **17 skill branches**. All are fork-specific — none have upstream skill branch equivalents. Upstream only has 3 skill branches (apple-container, compact, ollama-tool), and channels (whatsapp, telegram, etc.) are separate repos ("channel forks").
 
 ## Goals
 
 1. Align with upstream's architecture so future `git merge upstream/main` is trivial
-2. Preserve all 18 installed skills' functionality
+2. Preserve all installed skills' functionality (17 branches after folding whatsapp-types into whatsapp)
 3. Each skill gets its own branch on origin, matching upstream conventions
 4. Remove the old overlay engine (skills-engine/, `.nanoclaw/`, manifests)
 5. Detect and fix any regressions via per-skill review agents
@@ -48,9 +48,9 @@ main branch:
   .claude/skills/*/SKILL.md          # Operational skill instructions only
 
 skill/lifecycle-hooks branch:        # Fork-specific skill
-skill/whatsapp branch:               # Fork-specific skill (channel)
+skill/whatsapp branch:               # Fork-specific skill (channel, includes whatsapp-types)
 skill/reactions branch:              # Fork-specific skill
-... (18 branches total)
+... (17 branches total)
 ```
 
 Install: `git merge skill/whatsapp` → standard git merge → done.
@@ -65,9 +65,8 @@ main
 ├── skill/lifecycle-hooks
 │   └── skill/shabbat-mode           (depends: lifecycle-hooks)
 ├── skill/ipc-handler-registry
-├── skill/whatsapp-types
-│   └── skill/whatsapp               (depends: whatsapp-types)
-│       ├── skill/reactions           (modifies whatsapp.ts — file added by whatsapp)
+├── skill/whatsapp                    (includes whatsapp-types content — qrcode-terminal types)
+│   ├── skill/reactions               (modifies whatsapp.ts — file added by whatsapp)
 │       │   └── skill/voice-transcription-elevenlabs  (depends: reactions, modifies whatsapp.ts)
 │       │       └── skill/voice-recognition           (depends: voice-transcription-elevenlabs)
 │       └── skill/whatsapp-replies    (modifies whatsapp.ts + depends: whatsapp-search)
@@ -94,6 +93,12 @@ main
 ├── skill/google-home                 (branch from lifecycle-hooks, merge ipc-handler-registry)
 ```
 
+**Voice chain rationale:** `voice-transcription-elevenlabs` declares `depends: [reactions]` because its overlay to `whatsapp.ts` was built on top of reactions' changes to the same file. In the branch model, it branches from reactions (which already includes whatsapp's code) and adds its own `whatsapp.ts` modifications on top.
+
+**Directory ownership:** Some skills create entire directories that other skills then modify. `whatsapp-search` creates `rag-system/` (12+ files), and `whatsapp-replies` modifies `rag-system/src/ingestion.ts`. Similarly, `whatsapp` creates `src/channels/whatsapp.ts` which multiple skills modify. Any skill modifying files in an "owned" directory must branch from or merge the owning skill.
+
+**Upstream divergence:** Upstream's reactions skill branches from `main` (via a channel fork), not from `skill/whatsapp`. Our fork's reactions modifies `whatsapp.ts` directly, requiring the whatsapp → reactions dependency. This is a deliberate fork-specific choice.
+
 When merging a child branch into main, git automatically includes the parent's changes (since the child branched from the parent).
 
 ## Migration Phases
@@ -104,7 +109,7 @@ When merging a child branch into main, git automatically includes the parent's c
 
 **Prerequisite:** Verify backup tag exists: `pre-update-75032fd-20260311-103448` (created by the update-nanoclaw skill before this migration started). This is the rollback point for all phases.
 
-For each of the 18 skills, record from the manifest:
+For each of the 18 installed skills (17 after folding whatsapp-types into whatsapp), record from the manifest:
 - Files added (`add/` entries)
 - Files modified (`modify/` entries)
 - npm dependencies
@@ -148,7 +153,7 @@ After merge, main has upstream's clean src/ with no skills applied.
 
 ### Phase 3: Create Skill Branches
 
-For each of the 18 skills, a review agent:
+For each of the 17 skill branches, a review agent:
 
 1. **Creates branch** `skill/<name>` from the appropriate base:
    - Independent skills: branch from post-merge main
@@ -165,6 +170,7 @@ For each of the 18 skills, a review agent:
    - For `modify/` overlays: understand the intent, apply equivalent changes to new upstream src/
    - For `package.json`: add skill-specific dependencies
    - For `.env.example`: add skill-specific env vars
+   - For directories not in manifest but belonging to the skill (e.g., `akiflow-sync/` top-level dir with its own package.json — not in akiflow-sync manifest but clearly part of the skill): include them in the skill branch
 
 4. **Reviews for compatibility:**
    - Does the new upstream API still support this change?
@@ -179,8 +185,10 @@ For each of the 18 skills, a review agent:
 Process in dependency order (parents before children). Dependencies are based on actual file modifications, not just manifest declarations.
 
 **Tier 1 (no dependencies, branch from main, can run in parallel):**
+
+Within each tier, process in `installed-skills.yaml` order to minimize unexpected interactions when skills modify the same files (e.g., multiple skills modify `container/Dockerfile` in non-overlapping locations).
+
 - lifecycle-hooks
-- whatsapp-types
 - ipc-handler-registry
 - container-hardening
 - task-scheduler-fixes
@@ -190,7 +198,7 @@ Process in dependency order (parents before children). Dependencies are based on
 - feature-request
 
 **Tier 2 (depends on Tier 1, can run in parallel after Tier 1):**
-- whatsapp (branch from: whatsapp-types)
+- whatsapp (branch from: main — includes whatsapp-types content)
 - group-lifecycle (branch from: lifecycle-hooks, merge: ipc-handler-registry)
 - google-home (branch from: lifecycle-hooks, merge: ipc-handler-registry)
 - shabbat-mode (branch from: lifecycle-hooks)
@@ -206,14 +214,26 @@ Process in dependency order (parents before children). Dependencies are based on
 **Tier 5 (depends on Tier 4):**
 - voice-recognition (branch from: voice-transcription-elevenlabs)
 
+### Phase 3.5: Per-Branch Validation
+
+Before composing, validate each skill branch independently:
+
+```bash
+for branch in $(git branch --list 'skill/*'); do
+  git checkout "$branch"
+  npm run build && npm test
+done
+```
+
+This catches issues in isolation before they compound during the merge sequence.
+
 ### Phase 4: Compose by Merging Skill Branches
 
 Merge all skill branches into main in dependency order:
 
 ```bash
-# Tier 1 (independent — branch from main)
+# Tier 1 (independent — branch from main, in installed-skills.yaml order)
 git merge skill/lifecycle-hooks
-git merge skill/whatsapp-types
 git merge skill/ipc-handler-registry
 git merge skill/container-hardening
 git merge skill/task-scheduler-fixes
@@ -305,9 +325,9 @@ Skill branches (once pushed) survive a main reset, so Phase 3 work is never lost
 | Risk | Mitigation |
 |------|------------|
 | Overlay intent lost during translation | Review agents compare old overlay vs new code |
-| Dependency ordering wrong | Skill manifests declare dependencies explicitly |
+| Dependency ordering wrong | Tree derived from file-modification analysis + manifest `depends:` (manifests alone are incomplete) |
 | Upstream API changes break skill code | Review agents check function signatures |
-| Large scope (~18 skills) | Parallel agents, tiered processing |
+| Large scope (17 skill branches) | Parallel agents, tiered processing, per-branch validation |
 | Skills-engine removal breaks build | Phase 5 cleanup only after Phase 4 validation |
 | Multi-parent skill branches create merge diamonds | Branch from primary parent, merge secondary; test before committing |
 | Non-installed skill overlay files left behind | Explicit cleanup step in Phase 5 |
@@ -316,7 +336,7 @@ Skill branches (once pushed) survive a main reset, so Phase 3 work is never lost
 
 1. `npm run build` passes
 2. `npm test` passes
-3. All 18 skills' functionality preserved (verified by review agents)
+3. All 17 skill branches' functionality preserved (verified by review agents)
 4. `git merge upstream/main` on a future upstream update is conflict-free for core files
 5. No `.nanoclaw/` or `skills-engine/` artifacts remain
 6. Each skill has its own branch on origin
