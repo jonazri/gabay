@@ -35,17 +35,15 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 | `/process-feature-request` | Review and implement PRDs written by the container agent |
 
-## Build Model (Patch Queue)
+## Build Model (Skills as Branches)
 
-This fork uses a **patch-queue model**. `src/` in git matches upstream/main exactly. All fork customizations live as skills in `.claude/skills/` and are applied at build time.
+This fork uses **skills as branches**. Each skill is a git branch (`skill/<name>`) that modifies `src/` directly. Skills are installed via `git merge` and composed via standard git operations.
 
 ```bash
-npm run build          # Apply skills -> compile -> restore src/
-npm run build:quick    # Compile only (src/ must be pre-applied)
-npm run dev            # Apply skills -> watch mode (src/ stays applied)
-npm run apply-skills   # Apply all installed skills to src/
-npm run clean-skills   # Restore src/ to upstream state
-npm run package-skill  # Extract src/ changes into a new skill
+npm run build          # Compile TypeScript (tsc)
+npm run dev            # Watch mode (tsx watch src/index.ts)
+npm test               # Run tests
+./container/build.sh   # Rebuild agent container
 ```
 
 ### Development workflow
@@ -56,17 +54,29 @@ npm run package-skill  # Extract src/ changes into a new skill
    cd ../gabay-feature
    npm run dev
    ```
-2. Edit src/ freely during development
-3. When feature is ready: `npm run package-skill my-feature`
-4. Add skill to `.nanoclaw/installed-skills.yaml`, run `npm run build`
-5. Commit the skill files, not the src/ changes
+2. Edit src/ freely — changes are direct, no overlay system
+3. When ready, commit and push
 
 ### Upstream merges
 
 ```bash
-git fetch upstream && git merge upstream/main   # trivial — src/ matches
-npm run build                                    # re-applies skills
-npx vitest run                                   # verify
+git fetch upstream && git merge upstream/main   # merge upstream
+# Merge-forward CI automatically updates skill branches
+npm install && npm run build && npm test         # verify
+```
+
+### Skill branches
+
+Each skill lives on its own branch (`skill/<name>`). To install a skill:
+```bash
+git merge skill/<name>
+npm install
+```
+
+To update all skill branches after an upstream merge:
+```bash
+# merge-forward CI handles this automatically
+# or manually: git checkout skill/<name> && git merge main && git push
 ```
 
 ## Development
@@ -74,8 +84,8 @@ npx vitest run                                   # verify
 Run commands directly—don't tell the user to run them.
 
 ```bash
-npm run dev          # Apply skills + hot reload
-npm run build        # Apply skills -> compile -> restore src/
+npm run dev          # Hot reload (tsx watch src/index.ts)
+npm run build        # Compile TypeScript (tsc)
 ./container/build.sh # Rebuild agent container
 ```
 
@@ -103,8 +113,6 @@ tail -f ~/code/yonibot/gabay/logs/nanoclaw.log
 `scripts/scratch/` is gitignored — use it for throwaway queries, one-off database inspections, and temporary debugging scripts. Don't put reusable tools there.
 
 ## Troubleshooting
-
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate channel fork, not bundled in core. Run `/add-whatsapp` (or `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git && git fetch whatsapp main && (git merge whatsapp/main || { git checkout --theirs package-lock.json && git add package-lock.json && git merge --continue; }) && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
 **Container can't reach credential proxy (ECONNREFUSED on port 3001):** UFW may be blocking Docker bridge traffic. Fix: `sudo ufw allow from 172.17.0.0/16 to any port 3001 proto tcp`
 
