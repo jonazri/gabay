@@ -8,6 +8,38 @@
 
 **Tech Stack:** TypeScript (skills engine), bash (container build), YAML (manifests)
 
+## Task Dependency Graph
+
+```
+Task 1: Commit overlays ─────────┐
+Task 2: Move NODE_EXTRA_CA_CERTS ┼──► Task 3: Dirty-check guard ──► Task 4: Delete refresh-oauth ──► Task 5: Docs ──► Task 6: Build verification (Phase 1)
+                                 │
+                                 │    Task 6 ──► Task 7: Skill isolation (Phase 2)
+                                 │              ├──► 7a: container-hardening (parallel)
+                                 │              ├──► 7b: google-home (parallel)
+                                 │              └──► 7c: reactions (parallel)
+                                 │
+                                 │    Task 7 ──► Task 8: Full integration (Phase 3) ──► Task 9: Clean-skills safety (Phase 4) ──► Task 10: CI + PR
+```
+
+**Parallelism:**
+- Tasks 1 and 2 are independent — can run as parallel subagents (both edit different skill dirs)
+- Task 3 depends on both 1 and 2 (needs clean tree + correct install order for build verification)
+- Task 4 depends on 3 (build must work before deleting anything)
+- Task 5 depends on 4 (docs reference final state)
+- Tasks 6-9 are sequential regression phases
+- Task 7 subtasks (7a, 7b, 7c) can run as parallel subagents (each tests a different skill in isolation)
+- Task 10 depends on all prior tasks
+
+**Subagent dispatch strategy:**
+- **Wave 1:** Dispatch Task 1 and Task 2 in parallel (worktree isolation NOT needed — they touch different files)
+- **Wave 2:** Task 3 (sequential — modifies build tooling, needs results of Wave 1 committed)
+- **Wave 3:** Tasks 4 + 5 (can be one subagent since both are small)
+- **Wave 4:** Task 6 (build verification)
+- **Wave 5:** Tasks 7a, 7b, 7c in parallel (each restores installed-skills.yaml after testing)
+- **Wave 6:** Tasks 8 + 9 (sequential integration + safety tests, one subagent)
+- **Wave 7:** Task 10 (CI + PR)
+
 ---
 
 ### Task 1: Commit Already-Done Skill Overlay Changes
