@@ -1,17 +1,18 @@
-# WhatsApp
-WhatsApp channel via Baileys (Multi-Device Web API).
+# WhatsApp Search
+Semantic search over WhatsApp message history using Qdrant and OpenAI embeddings.
 
 ## Prerequisites
-None (base channel)
+None (standalone system)
 
 ## Installation
-1. `git fetch origin skill/whatsapp`
-2. `git merge origin/skill/whatsapp`
+1. `git fetch origin skill/whatsapp-search`
+2. `git merge origin/skill/whatsapp-search`
 3. `npm install`
-4. Run `npm run auth` to authenticate with WhatsApp
+4. Start Qdrant: `cd rag-system && docker compose up -d`
+5. Configure OpenAI API key for embeddings
 
 ## Verification
 - `npm run build && npm test`
 
 ## Environment Variables
-- `ASSISTANT_HAS_OWN_NUMBER` — Set to "true" if the assistant has its own dedicated WhatsApp number
+None (Qdrant and OpenAI keys configured in rag-system/)
