@@ -1,9 +1,9 @@
 {
-  "name": "task-scheduler-fixes",
-  "description": "Prevent duplicate task execution and improve task result routing",
+  "name": "whatsapp-search",
+  "description": "Semantic search over WhatsApp message history using Qdrant and OpenAI embeddings",
   "version": "1.0.0",
   "author": "jonazri",
   "depends": [],
   "env": [],
-  "tags": ["scheduler", "bugfix", "tasks"]
+  "tags": ["search", "rag", "whatsapp", "qdrant"]
 }
