@@ -258,7 +258,10 @@ Every skill branch follows this procedure. Phase 3 tasks dispatch subagents, one
    - Read the modify/ overlay from backup tag:
      git show pre-update-75032fd-20260311-103448:.claude/skills/$SKILL_DIR/modify/$FILE
    - Read the current version of the target file in the working tree
-   - Understand the INTENT of the overlay (what the skill adds/changes)
+   - Check for an intent companion file:
+     git show pre-update-75032fd-20260311-103448:.claude/skills/$SKILL_DIR/modify/$FILE.intent.md
+   - If it exists, use it as the authoritative description of the overlay's intent
+   - Otherwise, understand the INTENT from the overlay diff (what the skill adds/changes)
    - Apply equivalent changes to the current upstream version
    - git add $FILE
 
@@ -313,6 +316,7 @@ Every skill branch follows this procedure. Phase 3 tasks dispatch subagents, one
 - Apply the intent to the NEW upstream version of the file, not the old one. Upstream may have refactored, renamed functions, or changed signatures.
 - If the overlay's intent is now REDUNDANT (upstream added the same feature), skip it and document why.
 - If the overlay CONFLICTS fundamentally with upstream, flag for human decision.
+- Some manifests have a `modify_base` field. Ignore it in the branch model — apply only this skill's unique changes to the current branch state (which already includes parent changes via branching/merging).
 
 ### Task 5: Create Tier 1 Skill Branches (9 parallel agents)
 
