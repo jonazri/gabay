@@ -257,6 +257,19 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Akiflow SQLite DB (shared with akiflow-sync daemon)
+  const akiflowDbPath = process.env.AKIFLOW_DB_PATH
+    ? path.resolve(process.cwd(), process.env.AKIFLOW_DB_PATH)
+    : path.join(process.cwd(), 'akiflow', 'akiflow.db');
+  const akiflowDir = path.dirname(akiflowDbPath);
+  if (fs.existsSync(akiflowDir)) {
+    mounts.push({
+      hostPath: akiflowDir,
+      containerPath: '/workspace/akiflow',
+      readonly: false,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -278,6 +291,15 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Inject Akiflow SQLite DB path for container agent
+  const akiflowDbPathForEnv = process.env.AKIFLOW_DB_PATH
+    ? path.resolve(process.cwd(), process.env.AKIFLOW_DB_PATH)
+    : path.join(process.cwd(), 'akiflow', 'akiflow.db');
+  args.push(
+    '-e',
+    `AKIFLOW_DB=/workspace/akiflow/${path.basename(akiflowDbPathForEnv)}`,
+  );
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
