@@ -1,16 +1,19 @@
-# Container Hardening
-Container pipeline robustness: dead-process guards, log rotation, plugins sync.
+# Akiflow Sync
+Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local DB, and conflict resolution.
 
 ## Prerequisites
-None (infrastructure improvement)
+- skill/container-hardening
 
 ## Installation
-1. `git fetch origin skill/container-hardening`
-2. `git merge origin/skill/container-hardening`
+1. `git fetch origin skill/akiflow-sync`
+2. `git merge origin/skill/akiflow-sync`
 3. `npm install`
+4. `cd akiflow-sync && npm install`
 
 ## Verification
 - `npm run build && npm test`
+- `cd akiflow-sync && npm test`
 
 ## Environment Variables
-None
+- `AKIFLOW_REFRESH_TOKEN` — Akiflow API refresh token
+- `AKIFLOW_DB_PATH` — Path to Akiflow SQLite database

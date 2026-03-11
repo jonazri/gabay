@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    sqlite3 \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -49,6 +50,10 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install akiflow CLI dispatcher
+COPY skills/akiflow/akiflow /usr/local/bin/akiflow
+RUN chmod +x /usr/local/bin/akiflow
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

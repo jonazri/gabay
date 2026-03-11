@@ -1,9 +1,9 @@
 {
-  "name": "container-hardening",
-  "description": "Container pipeline robustness: dead-process guards, log rotation, plugins sync",
+  "name": "akiflow-sync",
+  "description": "Always-on Akiflow sync daemon with Pusher WebSocket, SQLite local DB, and conflict resolution",
   "version": "1.0.0",
   "author": "jonazri",
-  "depends": [],
-  "env": [],
-  "tags": ["container", "infrastructure", "reliability"]
+  "depends": ["container-hardening"],
+  "env": ["AKIFLOW_REFRESH_TOKEN", "AKIFLOW_DB_PATH"],
+  "tags": ["akiflow", "sync", "tasks", "productivity"]
 }
