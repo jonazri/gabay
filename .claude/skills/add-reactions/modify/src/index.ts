@@ -253,8 +253,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // Mark all user messages as thinking (container is spawning)
+  // In the main group (self-chat), is_from_me is always true for the user's
+  // own messages, so skip that filter to ensure status reactions still fire.
   const userMessages = missedMessages.filter(
-    (m) => !m.is_from_me && !m.is_bot_message,
+    (m) => !m.is_bot_message && (isMainGroup || !m.is_from_me),
   );
   for (const msg of userMessages) {
     statusTracker.markThinking(msg.id);
@@ -325,6 +327,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'error') {
       hadError = true;
+    }
+
+    // Mark tracked messages done on streaming success — don't wait for
+    // container exit. IDLE_TIMEOUT=30min leaves emojis stuck at 🔄.
+    if (result.status === 'success') {
+      statusTracker.markAllDone(chatJid);
     }
   });
 
@@ -529,7 +537,7 @@ async function startMessageLoop(): Promise<void> {
 
           // Mark each user message as received (status emoji)
           for (const msg of groupMessages) {
-            if (!msg.is_from_me && !msg.is_bot_message) {
+            if (!msg.is_bot_message && (isMainGroup || !msg.is_from_me)) {
               statusTracker.markReceived(msg.id, chatJid, false);
             }
           }
@@ -546,7 +554,7 @@ async function startMessageLoop(): Promise<void> {
             saveState();
             // Mark new user messages as thinking and save pipe cursor
             for (const msg of groupMessages) {
-              if (!msg.is_from_me && !msg.is_bot_message) {
+              if (!msg.is_bot_message && (isMainGroup || !msg.is_from_me)) {
                 statusTracker.markThinking(msg.id);
               }
             }

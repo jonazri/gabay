@@ -6,11 +6,11 @@ skills:
   - whatsapp-types
   - whatsapp
   - ipc-handler-registry
+  - container-hardening      # moved: infra before features
   - reactions
   - group-lifecycle
   - google-home
   - shabbat-mode
-  - container-hardening
   - task-scheduler-fixes
   - voice-transcription-elevenlabs
   - voice-recognition

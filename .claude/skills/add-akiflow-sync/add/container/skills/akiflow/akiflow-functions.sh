@@ -77,12 +77,31 @@ _akiflow_rag_search() {
     -d "$body" 2>/dev/null
 }
 
+# Internal: SQL expression converting a UTC ISO timestamp column to local "M/D h:MM AM/PM".
+# Uses SQLite's 'localtime' modifier (reads TZ env var). Usage: $(_local_time start) AS start
+_local_time() {
+  local c="$1"
+  if [[ -n "${_AKIFLOW_UTC:-}" ]]; then echo "[$c]"; return; fi
+  echo "CASE WHEN [$c] IS NULL OR [$c]='' THEN ''"\
+" ELSE CAST(strftime('%m',[$c],'localtime') AS INTEGER)"\
+"||'/'||CAST(strftime('%d',[$c],'localtime') AS INTEGER)"\
+"||' '||CASE CAST(strftime('%H',[$c],'localtime') AS INTEGER)"\
+" WHEN 0 THEN '12' WHEN 12 THEN '12'"\
+" ELSE CAST(strftime('%H',[$c],'localtime') AS INTEGER)%12 END"\
+"||':'||strftime('%M',[$c],'localtime')"\
+"||CASE WHEN CAST(strftime('%H',[$c],'localtime') AS INTEGER)<12"\
+" THEN ' AM' ELSE ' PM' END END"
+}
+
 akiflow:daily-brief() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow daily-brief"
+    echo "Usage: akiflow daily-brief [--utc]"
     echo "Show today's events, tasks, overdue summary, and inbox in one view."
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
+  local _AKIFLOW_UTC=""
+  [[ "${1:-}" == "--utc" ]] && _AKIFLOW_UTC=1
   local today today_display
   today=$(date +%Y-%m-%d)
   today_display=$(date +"%A, %B %-d, %Y")
@@ -93,10 +112,10 @@ akiflow:daily-brief() {
   echo "--- Events ---"
   local events
   events=$(sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT start, end, title, account, id
+    SELECT $(_local_time start) AS start, $(_local_time end) AS [end], title, account, id
     FROM events_view
     WHERE start >= '$today' AND start < date('$today', '+1 day')
-    ORDER BY start ASC")
+    ORDER BY events_view.start ASC")
   if [[ -z "$events" ]]; then echo "No meetings today."; else echo "$events"; fi
   echo ""
 
@@ -104,10 +123,10 @@ akiflow:daily-brief() {
   echo "--- Tasks ---"
   local tasks
   tasks=$(sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, label, org, datetime, priority, id
+    SELECT title, label, org, $(_local_time datetime) AS datetime, priority, id
     FROM tasks_display
     WHERE scheduled_date = '$today' AND done = 0 AND deleted_at IS NULL
-    ORDER BY datetime ASC, sorting ASC")
+    ORDER BY tasks_display.datetime ASC, sorting ASC")
   if [[ -z "$tasks" ]]; then echo "No tasks scheduled for today."; else echo "$tasks"; fi
   echo ""
 
@@ -147,10 +166,13 @@ akiflow:daily-brief() {
 
 akiflow:weekly-plan() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow weekly-plan"
+    echo "Usage: akiflow weekly-plan [--utc]"
     echo "Show this week's events and tasks, next week's events, overdue summary, and inbox."
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
+  local _AKIFLOW_UTC=""
+  [[ "${1:-}" == "--utc" ]] && _AKIFLOW_UTC=1
   local today dow week_start week_end next_week_start next_week_end
   today=$(date +%Y-%m-%d)
   dow=$(date +%u)  # 1=Mon, 7=Sun
@@ -170,10 +192,10 @@ akiflow:weekly-plan() {
   echo "--- Events this week ---"
   local events_this
   events_this=$(sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT start, end, title, account, id
+    SELECT $(_local_time start) AS start, $(_local_time end) AS [end], title, account, id
     FROM events_view
     WHERE start >= '$week_start' AND start < date('$week_end', '+1 day')
-    ORDER BY start ASC")
+    ORDER BY events_view.start ASC")
   if [[ -z "$events_this" ]]; then echo "No meetings this week."; else echo "$events_this"; fi
   echo ""
 
@@ -181,10 +203,10 @@ akiflow:weekly-plan() {
   echo "--- Events next week ---"
   local events_next
   events_next=$(sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT start, end, title, account, id
+    SELECT $(_local_time start) AS start, $(_local_time end) AS [end], title, account, id
     FROM events_view
     WHERE start >= '$next_week_start' AND start < date('$next_week_end', '+1 day')
-    ORDER BY start ASC")
+    ORDER BY events_view.start ASC")
   if [[ -z "$events_next" ]]; then echo "No meetings next week."; else echo "$events_next"; fi
   echo ""
 
@@ -192,11 +214,11 @@ akiflow:weekly-plan() {
   echo "--- Tasks this week ---"
   local tasks
   tasks=$(sqlite3 -markdown "$AKIFLOW_DB" "
-    SELECT title, label, org, scheduled_date, datetime, priority, id
+    SELECT title, label, org, scheduled_date, $(_local_time datetime) AS datetime, priority, id
     FROM tasks_display
     WHERE scheduled_date >= '$week_start' AND scheduled_date <= '$week_end'
       AND done = 0 AND deleted_at IS NULL
-    ORDER BY scheduled_date ASC, datetime ASC, sorting ASC")
+    ORDER BY scheduled_date ASC, tasks_display.datetime ASC, sorting ASC")
   if [[ -z "$tasks" ]]; then echo "No tasks scheduled this week."; else echo "$tasks"; fi
   echo ""
 
@@ -236,19 +258,21 @@ akiflow:weekly-plan() {
 
 akiflow:list-all() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow list-all [--format json] [--limit N]"
+    echo "Usage: akiflow list-all [--utc] [--format json] [--limit N]"
     echo "List all active tasks (inbox, planned, snoozed, someday)."
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
-  local flags=()
+  local _AKIFLOW_UTC="" flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      --utc) _AKIFLOW_UTC=1; shift ;;
       *) shift ;;
     esac
   done
   _akiflow_query "No active tasks found." "
-    SELECT title, status, label, org, scheduled_date, datetime, priority, id
+    SELECT title, status, label, org, scheduled_date, $(_local_time datetime) AS datetime, priority, id
     FROM tasks_display
     WHERE done = 0 AND deleted_at IS NULL
       AND status IN ('inbox','planned','snoozed','someday')
@@ -277,25 +301,27 @@ akiflow:list-inbox() {
 
 akiflow:list-today() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow list-today [--format json] [--limit N]"
+    echo "Usage: akiflow list-today [--utc] [--format json] [--limit N]"
     echo "List tasks scheduled for today."
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
-  local flags=()
+  local _AKIFLOW_UTC="" flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      --utc) _AKIFLOW_UTC=1; shift ;;
       *) shift ;;
     esac
   done
   local today
   today=$(date +%Y-%m-%d)
   _akiflow_query "No tasks scheduled for today. (Use akiflow list-overdue for past-due tasks.)" "
-    SELECT title, status, label, org, datetime, priority, id
+    SELECT title, status, label, org, $(_local_time datetime) AS datetime, priority, id
     FROM tasks_display
     WHERE scheduled_date = '$today'
       AND done = 0 AND deleted_at IS NULL
-    ORDER BY datetime ASC, sorting ASC" "${flags[@]}"
+    ORDER BY tasks_display.datetime ASC, sorting ASC" "${flags[@]}"
 }
 
 akiflow:list-overdue() {
@@ -341,8 +367,9 @@ akiflow:list-overdue() {
 
 akiflow:list-upcoming() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow list-upcoming [days] [--format json] [--limit N]"
+    echo "Usage: akiflow list-upcoming [days] [--utc] [--format json] [--limit N]"
     echo "List tasks scheduled within the next N days (default: 7, max: 365)."
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
   local days=7
@@ -352,10 +379,11 @@ akiflow:list-upcoming() {
   if ! [[ "$days" =~ ^[0-9]+$ ]] || (( days < 1 || days > 365 )); then
     echo "akiflow: days must be a number between 1 and 365" >&2; return 1
   fi
-  local flags=()
+  local _AKIFLOW_UTC="" flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      --utc) _AKIFLOW_UTC=1; shift ;;
       *) shift ;;
     esac
   done
@@ -363,12 +391,12 @@ akiflow:list-upcoming() {
   end_date=$(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || date -v+${days}d +%Y-%m-%d)
   today=$(date +%Y-%m-%d)
   _akiflow_query "No tasks in the next $days days." "
-    SELECT title, status, label, org, scheduled_date, datetime, priority, id
+    SELECT title, status, label, org, scheduled_date, $(_local_time datetime) AS datetime, priority, id
     FROM tasks_display
     WHERE done = 0 AND deleted_at IS NULL
       AND scheduled_date >= '$today'
       AND scheduled_date <= '$end_date'
-    ORDER BY scheduled_date ASC, datetime ASC" "${flags[@]}"
+    ORDER BY scheduled_date ASC, tasks_display.datetime ASC" "${flags[@]}"
 }
 
 akiflow:list-someday() {
@@ -417,8 +445,9 @@ akiflow:get-task() {
 
 akiflow:search-tasks() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow search-tasks '<query>' [--format json] [--limit N]"
+    echo "Usage: akiflow search-tasks '<query>' [--utc] [--format json] [--limit N]"
     echo "Hybrid semantic + keyword search for active tasks. Use | for OR in keyword fallback: 'tax|IRS|filing'"
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -427,12 +456,13 @@ akiflow:search-tasks() {
     return 1
   fi
   local query="$1"; shift
-  local format="markdown" limit=""
+  local _AKIFLOW_UTC="" format="markdown" limit=""
   local flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format) format="$2"; flags+=("$1" "$2"); shift 2 ;;
       --limit) limit="$2"; flags+=("$1" "$2"); shift 2 ;;
+      --utc) _AKIFLOW_UTC=1; shift ;;
       *) shift ;;
     esac
   done
@@ -479,7 +509,7 @@ akiflow:search-tasks() {
     fi
   done
   _akiflow_query "No tasks match '$query'." "
-    SELECT title, status, label, org, scheduled_date, datetime, priority, id
+    SELECT title, status, label, org, scheduled_date, $(_local_time datetime) AS datetime, priority, id
     FROM tasks_display
     WHERE ($where_clause)
       AND done = 0 AND deleted_at IS NULL" "${flags[@]}"
@@ -717,15 +747,17 @@ akiflow:list-calendars() {
 
 akiflow:list-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow list-events [period | start-date [end-date]] [--format json] [--limit N]"
+    echo "Usage: akiflow list-events [period | start-date [end-date]] [--utc] [--format json] [--limit N]"
     echo "List calendar events. Period: today (default), tomorrow, this-week, next-week."
     echo "Or pass one date (single day) or two dates (range): akiflow list-events 2026-03-15 2026-03-21"
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
-  local period="today" second_arg="" flags=()
+  local _AKIFLOW_UTC="" period="today" second_arg="" flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format|--limit) flags+=("$1" "$2"); shift 2 ;;
+      --utc) _AKIFLOW_UTC=1; shift ;;
       --*) shift ;;
       *)
         if [[ "$period" == "today" && "$1" != "today" ]]; then
@@ -765,16 +797,17 @@ akiflow:list-events() {
   esac
 
   _akiflow_query "No events found for $start to $end." "
-    SELECT start, end, title, account, CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
+    SELECT $(_local_time start) AS start, $(_local_time end) AS [end], title, account, CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
     FROM events_view
     WHERE start >= '$start' AND start < date('$end', '+1 day')
-    ORDER BY start ASC" "${flags[@]}"
+    ORDER BY events_view.start ASC" "${flags[@]}"
 }
 
 akiflow:search-events() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Usage: akiflow search-events '<query>' [--format json] [--limit N]"
+    echo "Usage: akiflow search-events '<query>' [--utc] [--format json] [--limit N]"
     echo "Hybrid semantic + keyword search for events. Use | for OR in keyword fallback: 'standup|meeting'"
+    echo "Times are shown in local timezone (M/D h:MM AM/PM). Use --utc for raw UTC."
     return 0
   fi
   if [[ -z "${1:-}" ]]; then
@@ -783,12 +816,13 @@ akiflow:search-events() {
     return 1
   fi
   local query="$1"; shift
-  local format="markdown" limit=""
+  local _AKIFLOW_UTC="" format="markdown" limit=""
   local flags=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format) format="$2"; flags+=("$1" "$2"); shift 2 ;;
       --limit) limit="$2"; flags+=("$1" "$2"); shift 2 ;;
+      --utc) _AKIFLOW_UTC=1; shift ;;
       *) shift ;;
     esac
   done
@@ -835,11 +869,11 @@ akiflow:search-events() {
     fi
   done
   _akiflow_query "No events match '$query'." "
-    SELECT start, end, title, account,
+    SELECT $(_local_time start) AS start, $(_local_time end) AS [end], title, account,
       CASE WHEN recurring THEN 'Y' ELSE '' END AS recurring, id
     FROM events_view
     WHERE ($where_clause)
-    ORDER BY start ASC" "${flags[@]}"
+    ORDER BY events_view.start ASC" "${flags[@]}"
 }
 
 akiflow:create-event() {

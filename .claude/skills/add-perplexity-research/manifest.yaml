@@ -4,8 +4,10 @@ description: "Web research via Perplexity Pro API (sonar, sonar-pro, sonar-deep-
 core_version: 0.1.0
 adds:
   - container/skills/perplexity-research/SKILL.md
+  - container/skills/perplexity-research/perplexity
 modifies:
   - src/container-runner.ts
+  - container/Dockerfile
 structured:
   env_additions:
     - PERPLEXITY_API_KEY

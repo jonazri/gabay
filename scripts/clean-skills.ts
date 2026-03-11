@@ -233,6 +233,21 @@ if (deleted.length === 0 && restored.length === 0) {
 
 console.log('\nState reset: applied_skills cleared.');
 
+// 9. Restore non-src/ runtime files that were deleted.
+// TypeScript files compile to dist/ and don't need to persist, but scripts,
+// container skill files, and other runtime dependencies must be restored.
+console.log('\nRestoring runtime files...');
+try {
+  execSync('npx tsx scripts/apply-skills.ts --deps-only', {
+    cwd: projectRoot,
+    stdio: 'inherit',
+  });
+} catch (err) {
+  errors.push(
+    `Failed to restore runtime files: ${err instanceof Error ? err.message : String(err)}`,
+  );
+}
+
 if (errors.length > 0) {
   process.exit(1);
 }
