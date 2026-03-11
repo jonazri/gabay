@@ -1,12 +1,12 @@
-# Container Hardening
-Container pipeline robustness: dead-process guards, log rotation, plugins sync.
+# Task Scheduler Fixes
+Prevent duplicate task execution and improve task result routing.
 
 ## Prerequisites
-None (infrastructure improvement)
+None
 
 ## Installation
-1. `git fetch origin skill/container-hardening`
-2. `git merge origin/skill/container-hardening`
+1. `git fetch origin skill/task-scheduler-fixes`
+2. `git merge origin/skill/task-scheduler-fixes`
 3. `npm install`
 
 ## Verification
