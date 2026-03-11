@@ -64,3 +64,4 @@ scripts/venv/
 # Throwaway/scratch scripts (temp queries, one-off debugging)
 scripts/scratch/*
 !scripts/scratch/README.md
+.claude/worktrees/
