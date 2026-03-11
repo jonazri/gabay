@@ -63,10 +63,18 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import {
+  initShabbatSchedule,
+  isShabbatOrYomTov,
+  startCandleLightingNotifier,
+  stopCandleLightingNotifier,
+} from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import {
+  onGuardLifted,
+  registerProcessingGuard,
   runChannelsReadyHooks,
   runShutdownHooks,
   runStartupHooks,
@@ -138,6 +146,46 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+/**
+ * Send a post-Shabbat summary of pending messages across all groups.
+ * Registered as a guard-lifted hook via the lifecycle system.
+ */
+async function sendPostShabbatSummary(): Promise<void> {
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.isMain === true,
+  )?.[0];
+  if (!userJid) return;
+
+  const channel = findChannel(channels, userJid);
+  if (!channel) return;
+
+  const summaryLines: string[] = [];
+  const pendingJids: string[] = [];
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    const sinceTimestamp = agentCursors.get(chatJid);
+    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    if (pending.length > 0) {
+      summaryLines.push(`• ${group.name}: ${pending.length} messages`);
+      pendingJids.push(chatJid);
+    }
+  }
+
+  let text = 'Shavua Tov!';
+  if (summaryLines.length > 0) {
+    text += `\n\nHere's what happened over Shabbat:\n${summaryLines.join('\n')}\n\nCatching up now.`;
+  }
+
+  await channel.sendMessage(userJid, text);
+  logger.info(
+    { groupsWithActivity: summaryLines.length },
+    'Post-Shabbat summary sent',
+  );
+
+  for (const chatJid of pendingJids) {
+    queue.enqueueMessageCheck(chatJid);
+  }
 }
 
 /**
@@ -529,6 +577,10 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  initShabbatSchedule();
+
+  // Register Shabbat/Yom Tov as a processing guard (returns false to block processing)
+  registerProcessingGuard(() => !isShabbatOrYomTov());
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
@@ -542,6 +594,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    stopCandleLightingNotifier();
     await queue.shutdown(10000);
     stopGoogleTokenScheduler();
     stopGoogleAssistantSocket();
@@ -644,6 +697,23 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+
+  // Candle lighting reminders (erev Shabbat and erev Yom Tov)
+  const userJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.isMain === true,
+  )?.[0];
+  if (userJid) {
+    startCandleLightingNotifier((text) => {
+      const channel = findChannel(channels, userJid);
+      if (channel) channel.sendMessage(userJid, text);
+    });
+  } else {
+    logger.warn('No main group registered — candle lighting notifier disabled');
+  }
+
+  // Register post-Shabbat summary hook (runs when guard lifts after Shabbat/Yom Tov)
+  onGuardLifted(sendPostShabbatSummary);
+
   recoverPendingMessages();
   startGoogleTokenScheduler((msg) => {
     const mainJid = Object.entries(registeredGroups).find(
