@@ -290,6 +290,43 @@ All commands logged to `/workspace/project/logs/macos-commands.log`:
 2026-03-01 15:31:15 | SUCCESS  | exit_code=0 | duration=45ms | files=12
 ```
 
+## Reference: RCLI macOS Actions Catalog
+
+[RCLI](https://github.com/RunanywhereAI/RCLI) (RunanywhereAI) is a local voice AI pipeline for Apple Silicon Macs that exposes **38 macOS actions** via AppleScript and shell — highly relevant as a reference for what actions to support in our implementation.
+
+### RCLI's macOS Action Categories (reference for our whitelist)
+
+RCLI supports actions across:
+- **Spotify/Music:** play, pause, next, volume, playlist control
+- **System:** volume up/down/mute, display brightness, screenshot
+- **Messaging:** send iMessage, read recent messages
+- **Reminders/Calendar:** create reminders, check upcoming events
+- **Web:** open URLs in Safari, run searches
+- **File operations:** list, open, move files via Finder
+- **Clipboard:** get/set clipboard content
+
+### How RCLI Executes Actions
+
+Uses the same approach we proposed — `osascript` for AppleScript and shell for system commands. Their action definitions can serve as a reference for building our tier-1 auto-approved whitelist.
+
+### Key Difference from Our Use Case
+
+RCLI is a **local** voice-to-action pipeline (runs on the Mac itself). We need a **remote** channel (Andy in Docker → IPC → host → macOS). The action catalog is reusable; the transport layer is different.
+
+### Recommended Actions to Port
+
+Based on RCLI's catalog, prioritize these for tier-1 (auto-approved):
+- Music/Spotify: play, pause, next, prev, volume, playlist
+- System: volume, mute, brightness, sleep display
+- Clipboard: get, set
+- Screenshot: capture to file
+- Reminders: create, list
+- Calendar: list upcoming events
+- Finder: list directory, open file/app
+- Safari: open URL
+
+---
+
 ## Related
 
 This complements the existing Google Home integration. Together they enable comprehensive home automation:
