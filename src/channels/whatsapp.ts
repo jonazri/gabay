@@ -248,9 +248,9 @@ export class WhatsAppChannel implements Channel {
 
             // Extract reply/quote context if present
             const contextInfo =
-              msg.message?.extendedTextMessage?.contextInfo ||
-              msg.message?.imageMessage?.contextInfo ||
-              msg.message?.videoMessage?.contextInfo ||
+              normalized.extendedTextMessage?.contextInfo ||
+              normalized.imageMessage?.contextInfo ||
+              normalized.videoMessage?.contextInfo ||
               null;
             const repliedToId = contextInfo?.stanzaId || undefined;
             const repliedToSender = contextInfo?.participant || undefined;
@@ -450,6 +450,7 @@ export class WhatsAppChannel implements Channel {
       id: latest.id,
       remoteJid: chatJid,
       fromMe: latest.fromMe,
+      participant: latest.sender,
     };
     await this.sendReaction(chatJid, messageKey, emoji);
   }

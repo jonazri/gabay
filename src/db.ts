@@ -418,14 +418,16 @@ export function getMessageFromMe(messageId: string, chatJid: string): boolean {
 
 export function getLatestMessage(
   chatJid: string,
-): { id: string; fromMe: boolean } | undefined {
+): { id: string; fromMe: boolean; sender?: string } | undefined {
   const row = db
     .prepare(
-      `SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+      `SELECT id, is_from_me, sender FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
     )
-    .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
+    .get(chatJid) as
+    | { id: string; is_from_me: number | null; sender?: string }
+    | undefined;
   if (!row) return undefined;
-  return { id: row.id, fromMe: row.is_from_me === 1 };
+  return { id: row.id, fromMe: row.is_from_me === 1, sender: row.sender };
 }
 
 export function storeReaction(reaction: Reaction): void {

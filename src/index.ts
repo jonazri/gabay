@@ -46,6 +46,9 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+// Side-effect imports: register custom IPC handlers before dispatch
+import './ipc-handlers/google-home.js';
+import './ipc-handlers/group-lifecycle.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
