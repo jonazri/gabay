@@ -32,6 +32,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  deleteRegisteredGroup,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -44,6 +45,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import './ipc-handlers/group-lifecycle.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -499,6 +501,15 @@ function recoverPendingMessages(): void {
   }
 }
 
+function unregisterGroup(jid: string): boolean {
+  const deleted = deleteRegisteredGroup(jid);
+  if (deleted) {
+    delete registeredGroups[jid];
+    logger.info({ jid }, 'Group unregistered');
+  }
+  return deleted;
+}
+
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
@@ -608,6 +619,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    unregisterGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels

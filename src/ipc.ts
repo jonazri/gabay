@@ -27,6 +27,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  unregisterGroup?: (jid: string) => boolean;
 }
 
 let ipcWatcherRunning = false;

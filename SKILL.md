@@ -1,12 +1,13 @@
-# IPC Handler Registry
-IPC handler registry + self-heal — skills register handlers instead of replacing ipc.ts, with error recovery notifications.
+# Group Lifecycle
+Group unregistration via IPC for dynamic group management.
 
 ## Prerequisites
-None (base infrastructure)
+- skill/lifecycle-hooks
+- skill/ipc-handler-registry
 
 ## Installation
-1. `git fetch origin skill/ipc-handler-registry`
-2. `git merge origin/skill/ipc-handler-registry`
+1. `git fetch origin skill/group-lifecycle`
+2. `git merge origin/skill/group-lifecycle`
 3. `npm install`
 
 ## Verification
