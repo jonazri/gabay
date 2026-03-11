@@ -14,6 +14,85 @@
 
 ---
 
+## Task Dependency Graph & Parallelization
+
+```
+Tasks 1→2→3→4  (sequential — foundation, must complete before any skill branches)
+         │
+         ▼
+   ┌─────────────────────────────────────────────────┐
+   │  Task 5: Tier 1 branches (9 skills, parallel)   │
+   │  lifecycle-hooks, whatsapp, ipc-handler-registry,│
+   │  container-hardening, task-scheduler-fixes,      │
+   │  whatsapp-search, perplexity-research,           │
+   │  feature-request, whatsapp-summary               │
+   └──────┬──────────────────────────┬────────────────┘
+          │                          │
+          ▼                          ▼
+   Task 6: Tier 2 (4 skills)   Task 7: Tier 3 (2 skills)
+   group-lifecycle              reactions
+   google-home                  whatsapp-replies
+   shabbat-mode                 ┌──────┐
+   akiflow-sync                 │      ▼
+          │                     │ Task 8: Tier 4 (1 skill)
+          │                     │ voice-transcription-elevenlabs
+          │                     │      │
+          │                     │      ▼
+          │                     │ Task 9: Tier 5 (1 skill)
+          │                     │ voice-recognition
+          │                     └──────┘
+          ▼                          │
+   ┌─────────────────────────────────┘
+   ▼
+Tasks 10→11→12→13→14→15  (sequential — validate, compose, cleanup)
+```
+
+**Key insight:** Tasks 6 and 7 can run in parallel (Tier 3 depends on Tier 1, not Tier 2). Tasks 8-9 are sequential and depend only on Task 7.
+
+### Parallelization Strategy (5 agents)
+
+With 5 available agents, distribute work as follows:
+
+**Phase A — Foundation (sequential, 1 agent):**
+Tasks 1-4 run on the main orchestrator. No parallelism needed.
+
+**Phase B — Skill Branch Creation (5 agents):**
+
+Tier 1 has 9 skills. With 5 agents, dispatch in two waves:
+
+| Agent | Wave 1 (from Task 5) | Wave 2 (from Task 5) | Wave 3 (Tasks 6-9) |
+|-------|----------------------|----------------------|---------------------|
+| A | lifecycle-hooks | — | group-lifecycle (after lifecycle-hooks) |
+| B | whatsapp | — | reactions → voice-trans → voice-recog (serial chain) |
+| C | ipc-handler-registry | whatsapp-summary | google-home (after lifecycle-hooks + ipc) |
+| D | container-hardening | feature-request | akiflow-sync (after container-hardening) |
+| E | whatsapp-search | perplexity-research | shabbat-mode (after lifecycle-hooks) + whatsapp-replies (after whatsapp + whatsapp-search) |
+
+**Wave 1:** 5 agents dispatch the 5 most complex Tier 1 skills (lifecycle-hooks, whatsapp, ipc-handler-registry, container-hardening, whatsapp-search).
+
+**Wave 2:** As agents finish Wave 1, they pick up remaining Tier 1 skills (task-scheduler-fixes, perplexity-research, feature-request, whatsapp-summary). These are simpler and should complete fast.
+
+**Wave 3:** As agents finish Wave 2, they start Tier 2-5 skills based on which prerequisites they already built:
+- Agent A built lifecycle-hooks → picks up group-lifecycle
+- Agent B built whatsapp → picks up reactions → voice-transcription-elevenlabs → voice-recognition (serial chain, all depend on prior)
+- Agent C built ipc-handler-registry → picks up google-home (after lifecycle-hooks is also done)
+- Agent D built container-hardening → picks up akiflow-sync
+- Agent E built whatsapp-search → picks up whatsapp-replies (after whatsapp is also done) and shabbat-mode (after lifecycle-hooks is done)
+
+**Constraints for Wave 3:**
+- group-lifecycle and google-home need BOTH lifecycle-hooks AND ipc-handler-registry pushed
+- whatsapp-replies needs BOTH whatsapp AND whatsapp-search pushed
+- reactions needs whatsapp pushed
+- shabbat-mode needs lifecycle-hooks pushed
+- akiflow-sync needs container-hardening pushed
+- voice-transcription-elevenlabs needs reactions pushed
+- voice-recognition needs voice-transcription-elevenlabs pushed
+
+**Phase C — Validation & Cleanup (sequential, 1 agent):**
+Tasks 10-15 run on the main orchestrator after all skill branches are pushed. Task 10 (per-branch validation) can optionally fan out to 5 agents, each validating ~3-4 branches.
+
+---
+
 ## Chunk 1: Foundation (Phase 1-2)
 
 ### Task 1: Verify Prerequisites & Capture Skill Metadata
