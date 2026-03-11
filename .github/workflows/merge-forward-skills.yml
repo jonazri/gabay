@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   merge-forward:
-    if: github.repository == 'qwibitai/nanoclaw'
+    if: github.repository == 'jonazri/gabay'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
