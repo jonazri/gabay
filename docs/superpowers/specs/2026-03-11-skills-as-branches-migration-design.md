@@ -25,7 +25,12 @@ Our fork has 18 installed skills using the old patch-queue model, but `whatsapp-
 
 ## Future: Private Marketplace
 
-After migration, we plan to adopt Claude Code's marketplace plugin system to build a **private marketplace for Shluchim** — publishing select fork skills and accepting community contributions. This is a separate spec (not part of this migration) but informs our architecture: skill branches should be structured so they can be published to a marketplace later. See the dedicated marketplace spec when available.
+After migration, we plan to adopt Claude Code's marketplace plugin system to build a **private marketplace for Shluchim** — publishing select fork skills and accepting community contributions. This is a separate spec (not part of this migration) but informs our architecture.
+
+**Marketplace-readiness baked into this migration:**
+1. Each skill branch includes a `SKILL.md` (installation instructions) and `skill-metadata.json` (structured catalog metadata) — ready to publish as-is
+2. Merge-forward CI keeps skill branches current — consumers always get compatible code
+3. Branch naming convention (`skill/<name>`) matches upstream's marketplace expectations
 
 ## Architecture
 
@@ -51,11 +56,13 @@ Build: `npm run apply-skills` → three-way merge overlays onto src/ → compile
 main branch:
   src/                               # Upstream-clean, no skill code
   .claude/skills/*/SKILL.md          # Operational skill instructions only
+  .github/workflows/merge-forward-skills.yml  # Keeps skill branches current
 
-skill/lifecycle-hooks branch:        # Fork-specific skill
-skill/whatsapp branch:               # Fork-specific skill (channel, includes whatsapp-types)
-skill/reactions branch:              # Fork-specific skill
-... (17 branches total)
+skill/<name> branch (×17):           # Each skill branch contains:
+  SKILL.md                           # Installation instructions (marketplace-publishable)
+  skill-metadata.json                # Structured metadata for catalog generation
+  src/                               # Skill's code changes merged into upstream src/
+  package.json                       # Updated with skill-specific dependencies
 ```
 
 Install: `git merge skill/whatsapp` → resolve conflicts (including `package.json`/`package-lock.json`) → `npm install` → done.
@@ -185,7 +192,38 @@ For each of the 17 skill branches, a review agent:
    - Are there new upstream patterns we should adopt?
    - Is any of our code now redundant (upstream added it)?
 
-5. **Commits and pushes** the skill branch to origin
+5. **Creates marketplace-ready artifacts** on the skill branch:
+   - **`SKILL.md`** — Installation instructions that a marketplace can publish as-is. Format:
+     ```markdown
+     # <Skill Name>
+     <One-line description>
+     ## Prerequisites
+     - <other skills that must be installed first>
+     ## Installation
+     1. `git fetch origin skill/<name>`
+     2. `git merge origin/skill/<name>`
+     3. `npm install`
+     4. <any credential/config steps>
+     ## Verification
+     - `npm run build && npm test`
+     ## Environment Variables
+     - `VAR_NAME` — description
+     ```
+   - **`skill-metadata.json`** — Structured metadata for catalog generation:
+     ```json
+     {
+       "name": "<name>",
+       "description": "<one-line>",
+       "version": "1.0.0",
+       "author": "jonazri",
+       "depends": ["<parent-skill>"],
+       "env": ["VAR_NAME"],
+       "tags": ["whatsapp", "voice", etc.]
+     }
+     ```
+   These files live on the skill branch root (not in `.claude/skills/`). They cost nothing to create now and save a full pass when building the marketplace later.
+
+6. **Commits and pushes** the skill branch to origin
 
 ### Phase 3 Skill Processing Order
 
@@ -283,6 +321,9 @@ Git handles composition. Conflicts (if any) are resolved interactively.
 
 **Skill directory naming:** Some skill directories don't follow the `add-` prefix convention (e.g., `ipc-handler-registry/`, `whatsapp-replies/`). The new skill branch names (`skill/<name>`) don't need prefixes, so this is a non-issue post-migration.
 
+**Enable merge-forward CI:**
+- Upstream's `.github/workflows/merge-forward-skills.yml` (arriving via the Phase 2 merge) automatically merges main into every `skill/*` branch on each push to main, runs build + test, and opens an issue if any fail. Verify this workflow is present and functional after the merge. This is critical for marketplace readiness — other Shluchim consuming our skill branches need them to stay current with main.
+
 **Update documentation:**
 - CLAUDE.md: replace "Build Model (Patch Queue)" with skills-as-branches instructions
 - Update development workflow section
@@ -349,4 +390,5 @@ Skill branches (once pushed) survive a main reset, so Phase 3 work is never lost
 3. All 17 skill branches' functionality preserved (verified by review agents)
 4. `git merge upstream/main` on a future upstream update is conflict-free for core files
 5. No `.nanoclaw/` or `skills-engine/` artifacts remain
-6. Each skill has its own branch on origin
+6. Each skill has its own branch on origin with `SKILL.md` and `skill-metadata.json`
+7. Merge-forward CI workflow runs successfully on all skill branches
