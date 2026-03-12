@@ -71,8 +71,9 @@ export class StatusTracker {
     this.persistPath = path.join(DATA_DIR, 'status-tracker.json');
   }
 
-  markReceived(messageId: string, chatJid: string, fromMe: boolean): boolean {
+  markReceived(messageId: string, chatJid: string, fromMe: boolean, isBotMessage: boolean): boolean {
     if (!this.deps.isMainGroup(chatJid)) return false;
+    if (isBotMessage) return false;
     if (this.tracked.has(messageId)) return false;
 
     const msg: TrackedMessage = {

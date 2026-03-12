@@ -44,7 +44,7 @@ describe('StatusTracker', () => {
 
   describe('forward-only transitions', () => {
     it('transitions RECEIVED -> THINKING -> WORKING -> DONE', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
       tracker.markWorking('msg1');
       tracker.markDone('msg1');
@@ -58,7 +58,7 @@ describe('StatusTracker', () => {
     });
 
     it('rejects backward transitions (WORKING -> THINKING is no-op)', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
       tracker.markWorking('msg1');
 
@@ -70,7 +70,7 @@ describe('StatusTracker', () => {
     });
 
     it('rejects duplicate transitions (DONE -> DONE is no-op)', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markDone('msg1');
 
       const result = tracker.markDone('msg1');
@@ -81,7 +81,7 @@ describe('StatusTracker', () => {
     });
 
     it('allows FAILED from any non-terminal state', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markFailed('msg1');
       await tracker.flush();
 
@@ -90,7 +90,7 @@ describe('StatusTracker', () => {
     });
 
     it('rejects FAILED after DONE', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markDone('msg1');
 
       const result = tracker.markFailed('msg1');
@@ -103,7 +103,7 @@ describe('StatusTracker', () => {
 
   describe('main group gating', () => {
     it('ignores messages from non-main groups', async () => {
-      tracker.markReceived('msg1', 'group@g.us', false);
+      tracker.markReceived('msg1', 'group@g.us', false, false);
       await tracker.flush();
       expect(deps.sendReaction).not.toHaveBeenCalled();
     });
@@ -111,8 +111,8 @@ describe('StatusTracker', () => {
 
   describe('duplicate tracking', () => {
     it('rejects duplicate markReceived for same messageId', async () => {
-      const first = tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
-      const second = tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      const first = tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
+      const second = tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       expect(first).toBe(true);
       expect(second).toBe(false);
@@ -133,8 +133,8 @@ describe('StatusTracker', () => {
 
   describe('batch operations', () => {
     it('markAllDone transitions all tracked messages for a chatJid', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
-      tracker.markReceived('msg2', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
+      tracker.markReceived('msg2', 'main@s.whatsapp.net', false, false);
       tracker.markAllDone('main@s.whatsapp.net');
       await tracker.flush();
 
@@ -143,8 +143,8 @@ describe('StatusTracker', () => {
     });
 
     it('markAllFailed transitions all tracked messages and sends error message', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
-      tracker.markReceived('msg2', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
+      tracker.markReceived('msg2', 'main@s.whatsapp.net', false, false);
       tracker.markAllFailed('main@s.whatsapp.net', 'Task crashed');
       await tracker.flush();
 
@@ -162,7 +162,7 @@ describe('StatusTracker', () => {
         order.push(emoji);
       });
 
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
       tracker.markWorking('msg1');
       tracker.markDone('msg1');
@@ -226,7 +226,7 @@ describe('StatusTracker', () => {
   describe('heartbeatCheck', () => {
     it('marks messages as failed when container is dead', async () => {
       deps.isContainerAlive.mockReturnValue(false);
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
 
       tracker.heartbeatCheck();
@@ -242,7 +242,7 @@ describe('StatusTracker', () => {
 
     it('does nothing when container is alive', async () => {
       deps.isContainerAlive.mockReturnValue(true);
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
 
       tracker.heartbeatCheck();
@@ -257,7 +257,7 @@ describe('StatusTracker', () => {
     it('skips RECEIVED messages within grace period even if container is dead', async () => {
       vi.useFakeTimers();
       deps.isContainerAlive.mockReturnValue(false);
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       // Only 10s elapsed — within 30s grace period
       await vi.advanceTimersByTimeAsync(10_000);
@@ -273,7 +273,7 @@ describe('StatusTracker', () => {
     it('fails RECEIVED messages after grace period when container is dead', async () => {
       vi.useFakeTimers();
       deps.isContainerAlive.mockReturnValue(false);
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       // 31s elapsed — past 30s grace period
       await vi.advanceTimersByTimeAsync(31_000);
@@ -292,7 +292,7 @@ describe('StatusTracker', () => {
     it('does NOT fail RECEIVED messages after grace period when container is alive', async () => {
       vi.useFakeTimers();
       deps.isContainerAlive.mockReturnValue(true);
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       // 31s elapsed but container is alive — don't fail
       await vi.advanceTimersByTimeAsync(31_000);
@@ -308,7 +308,7 @@ describe('StatusTracker', () => {
       vi.useFakeTimers();
       deps.isContainerAlive.mockReturnValue(true); // container "alive" but hung
 
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
 
       // Advance time beyond container timeout (default 1800000ms = 30min)
@@ -330,7 +330,7 @@ describe('StatusTracker', () => {
       vi.useFakeTimers();
       deps.isContainerAlive.mockReturnValue(true);
 
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       // Message sits in RECEIVED for longer than CONTAINER_TIMEOUT (queued, waiting for slot)
       await vi.advanceTimersByTimeAsync(2_000_000);
@@ -361,7 +361,7 @@ describe('StatusTracker', () => {
   describe('cleanup', () => {
     it('removes terminal messages after delay', async () => {
       vi.useFakeTimers();
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
       tracker.markDone('msg1');
 
       // Message should still be tracked
@@ -383,7 +383,7 @@ describe('StatusTracker', () => {
         if (callCount <= 2) throw new Error('network error');
       });
 
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       // First attempt fires immediately
       await vi.advanceTimersByTimeAsync(100);
@@ -414,7 +414,7 @@ describe('StatusTracker', () => {
         throw new Error('permanent failure');
       });
 
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
 
       await vi.advanceTimersByTimeAsync(10_000);
       await tracker.flush();
@@ -425,9 +425,9 @@ describe('StatusTracker', () => {
 
   describe('batch transitions', () => {
     it('markThinking can be called on multiple messages independently', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
-      tracker.markReceived('msg2', 'main@s.whatsapp.net', false);
-      tracker.markReceived('msg3', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
+      tracker.markReceived('msg2', 'main@s.whatsapp.net', false, false);
+      tracker.markReceived('msg3', 'main@s.whatsapp.net', false, false);
 
       // Mark all as thinking (simulates batch behavior)
       tracker.markThinking('msg1');
@@ -441,8 +441,8 @@ describe('StatusTracker', () => {
     });
 
     it('markWorking can be called on multiple messages independently', async () => {
-      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
-      tracker.markReceived('msg2', 'main@s.whatsapp.net', false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false, false);
+      tracker.markReceived('msg2', 'main@s.whatsapp.net', false, false);
       tracker.markThinking('msg1');
       tracker.markThinking('msg2');
 

@@ -275,7 +275,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Track received messages for emoji status reactions
   for (const msg of missedMessages) {
     const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-    statusTracker?.markReceived(msg.id, chatJid, fromMe);
+    statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.is_bot_message === true);
   }
 
   // Advance user messages to THINKING (👀 → 💭)
@@ -653,7 +653,7 @@ async function main(): Promise<void> {
 
       // Fire 👀 immediately on real-time message event, not on next poll cycle
       const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-      statusTracker?.markReceived(msg.id, chatJid, fromMe);
+      statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.is_bot_message === true);
     },
     onChatMetadata: (
       chatJid: string,
@@ -664,6 +664,23 @@ async function main(): Promise<void> {
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
+
+  // Initialize status tracker BEFORE channels connect, so onMessage can fire 👀 immediately
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+  await statusTracker.recover();
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
@@ -686,23 +703,6 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
-
-  // Initialize status tracker for emoji reactions
-  statusTracker = new StatusTracker({
-    sendReaction: async (chatJid, messageKey, emoji) => {
-      const channel = findChannel(channels, chatJid);
-      if (!channel?.sendReaction) return;
-      await channel.sendReaction(chatJid, messageKey, emoji);
-    },
-    sendMessage: async (chatJid, text) => {
-      const channel = findChannel(channels, chatJid);
-      if (!channel) return;
-      await channel.sendMessage(chatJid, text);
-    },
-    isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
-    isContainerAlive: (chatJid) => queue.isActive(chatJid),
-  });
-  await statusTracker.recover();
 
   // Start Google Assistant socket server for container CLI access
   startGoogleAssistantSocket();
