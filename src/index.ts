@@ -310,12 +310,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     await emitAgentOutput(chatJid, result);
     // Streaming output callback — called for each agent result
     if (result.result) {
-      // Advance user messages to WORKING on first output (💭 → 🔄)
+      // Advance all tracked messages to WORKING on first output (💭 → 🔄)
+      // Uses markAllWorking so piped messages are included, not just the initial batch
       if (!firstOutputSeen) {
         firstOutputSeen = true;
-        for (const um of userMessages) {
-          statusTracker?.markWorking(um.id);
-        }
+        statusTracker?.markAllWorking(chatJid);
       }
       const raw =
         typeof result.result === 'string'
@@ -542,6 +541,10 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            // Agent is about to see these — advance to THINKING (👀 → 💭)
+            for (const msg of groupMessages) {
+              statusTracker?.markThinking(msg.id);
+            }
             await emitMessagePiped(chatJid, messagesToSend.length);
             logger.debug(
               { chatJid, count: messagesToSend.length },
@@ -647,6 +650,10 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Fire 👀 immediately on real-time message event, not on next poll cycle
+      const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+      statusTracker?.markReceived(msg.id, chatJid, fromMe);
     },
     onChatMetadata: (
       chatJid: string,

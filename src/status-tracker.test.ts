@@ -260,8 +260,9 @@ describe('StatusTracker', () => {
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
 
       // Only 10s elapsed — within 30s grace period
-      vi.advanceTimersByTime(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       tracker.heartbeatCheck();
+      await vi.advanceTimersByTimeAsync(1000);
       await tracker.flush();
 
       // Only the 👀 reaction, no ❌
@@ -275,8 +276,9 @@ describe('StatusTracker', () => {
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
 
       // 31s elapsed — past 30s grace period
-      vi.advanceTimersByTime(31_000);
+      await vi.advanceTimersByTimeAsync(31_000);
       tracker.heartbeatCheck();
+      await vi.advanceTimersByTimeAsync(1000);
       await tracker.flush();
 
       const failCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
@@ -293,8 +295,9 @@ describe('StatusTracker', () => {
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
 
       // 31s elapsed but container is alive — don't fail
-      vi.advanceTimersByTime(31_000);
+      await vi.advanceTimersByTimeAsync(31_000);
       tracker.heartbeatCheck();
+      await vi.advanceTimersByTimeAsync(1000);
       await tracker.flush();
 
       expect(deps.sendReaction).toHaveBeenCalledTimes(1);
@@ -309,9 +312,10 @@ describe('StatusTracker', () => {
       tracker.markThinking('msg1');
 
       // Advance time beyond container timeout (default 1800000ms = 30min)
-      vi.advanceTimersByTime(1_800_001);
+      await vi.advanceTimersByTimeAsync(1_800_001);
 
       tracker.heartbeatCheck();
+      await vi.advanceTimersByTimeAsync(1000);
       await tracker.flush();
 
       const failCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
@@ -329,12 +333,13 @@ describe('StatusTracker', () => {
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
 
       // Message sits in RECEIVED for longer than CONTAINER_TIMEOUT (queued, waiting for slot)
-      vi.advanceTimersByTime(2_000_000);
+      await vi.advanceTimersByTimeAsync(2_000_000);
 
       // Now container starts — trackedAt resets on THINKING transition
       tracker.markThinking('msg1');
 
       // Check immediately — should NOT timeout (trackedAt was just reset)
+      await vi.advanceTimersByTimeAsync(1000);
       tracker.heartbeatCheck();
       await tracker.flush();
 
@@ -342,9 +347,10 @@ describe('StatusTracker', () => {
       expect(failCalls).toHaveLength(0);
 
       // Advance past CONTAINER_TIMEOUT from THINKING — NOW it should timeout
-      vi.advanceTimersByTime(1_800_001);
+      await vi.advanceTimersByTimeAsync(1_800_001);
 
       tracker.heartbeatCheck();
+      await vi.advanceTimersByTimeAsync(1000);
       await tracker.flush();
 
       const failCallsAfter = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
@@ -380,7 +386,7 @@ describe('StatusTracker', () => {
       tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
 
       // First attempt fires immediately
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
       expect(callCount).toBe(1);
 
       // After 2s: second attempt (first retry delay = 2s)
@@ -395,6 +401,8 @@ describe('StatusTracker', () => {
       await vi.advanceTimersByTimeAsync(3000);
       expect(callCount).toBe(3);
 
+      // Advance past the post-send transition delay
+      await vi.advanceTimersByTimeAsync(1000);
       await tracker.flush();
     });
 

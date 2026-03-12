@@ -22,6 +22,7 @@ const CLEANUP_DELAY_MS = 5000;
 const RECEIVED_GRACE_MS = 30_000;
 const REACTION_MAX_RETRIES = 3;
 const REACTION_BASE_DELAY_MS = 2000;
+const MIN_TRANSITION_DELAY_MS = 800;
 
 interface MessageKey {
   id: string;
@@ -104,6 +105,14 @@ export class StatusTracker {
 
   markFailed(messageId: string): boolean {
     return this.transitionTerminal(messageId, 'failed', FAILED_EMOJI);
+  }
+
+  markAllWorking(chatJid: string): void {
+    for (const [id, msg] of this.tracked) {
+      if (msg.chatJid === chatJid && msg.terminal === null) {
+        this.transition(id, StatusState.WORKING, '\u{1F504}');
+      }
+    }
   }
 
   markAllDone(chatJid: string): void {
@@ -269,6 +278,8 @@ export class StatusTracker {
       for (let attempt = 1; attempt <= REACTION_MAX_RETRIES; attempt++) {
         try {
           await this.deps.sendReaction(msg.chatJid, key, emoji);
+          // Ensure each transition is visible before the next one fires
+          await new Promise((r) => setTimeout(r, MIN_TRANSITION_DELAY_MS));
           return;
         } catch (err) {
           if (attempt === REACTION_MAX_RETRIES) {
