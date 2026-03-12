@@ -129,32 +129,3 @@ jobs:
               body,
               labels: ['skill-maintenance']
             });
-
-      - name: Notify channel forks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.FORK_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
-          script: |
-            const forks = [
-              'nanoclaw-whatsapp',
-              'nanoclaw-telegram',
-              'nanoclaw-discord',
-              'nanoclaw-slack',
-              'nanoclaw-gmail',
-              'nanoclaw-docker-sandboxes',
-            ];
-            const sha = context.sha.substring(0, 7);
-            for (const repo of forks) {
-              try {
-                await github.rest.repos.createDispatchEvent({
-                  owner: 'qwibitai',
-                  repo,
-                  event_type: 'upstream-main-updated',
-                  client_payload: { sha: context.sha },
-                });
-                console.log(`Notified ${repo}`);
-              } catch (e) {
-                console.log(`Failed to notify ${repo}: ${e.message}`);
-              }
-            }

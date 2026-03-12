@@ -61,6 +61,9 @@ scripts/oauth/
 # Runtime database
 nanoclaw.db
 
+# Akiflow sync runtime data (live DB, logs, PID)
+akiflow/
+
 # Python
 scripts/venv/
 **/__pycache__/
